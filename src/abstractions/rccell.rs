@@ -10,8 +10,8 @@ The `RcCell` library defines two structs:
 - `RcCell<T>`: a wrapper for `Rc<RefCell<T>>`.
 - `WeakCell<T>`: a wrapper for `Weak<RefCell<T>>`.
 
-```rust
-use Mod::abstractions::{RcCell, WeakCell};
+```ignore
+use mod2lib::abstractions::{RcCell, WeakCell};
 
 let a = RcCell::new(1); // a is a RcCell that wraps an Rc<RefCell<i32>>
 let b = a.clone();      // You can create multiple RcCells pointing to the same data.
@@ -62,8 +62,8 @@ impl<T> RcCell<T> {
   /// Otherwise, it returns an `Err` with the same `RefCell` that was passed in.
   /// Note that this function success even if there are multiple weak references.
   /// # Examples
-  /// ```rust
-  /// use Mod::abstractions::RcCell;
+  /// ```ignore
+  /// use mod2lib::abstractions::RcCell;
   ///
   /// let x = RcCell::new(1);
   /// assert_eq!(RcCell::try_unwrap(x), Ok(1));
@@ -78,8 +78,8 @@ impl<T> RcCell<T> {
 
   /// Constructs a new `RcCell<T>`.
   /// # Examples
-  /// ```rust
-  /// use Mod::abstractions::RcCell;
+  /// ```ignore
+  /// use mod2lib::abstractions::RcCell;
   ///
   /// let x = RcCell::new(1);
   /// ```
@@ -92,8 +92,8 @@ impl<T: ?Sized> RcCell<T> {
   /// Similar to [Rc::downgrade].
   /// Creates a new [WeakCell] pointer to this allocation.
   /// # Examples
-  /// ```rust
-  /// use Mod::abstractions::RcCell;
+  /// ```ignore
+  /// use mod2lib::abstractions::RcCell;
   ///
   /// let x = RcCell::new(1);
   /// let weak_five = x.downgrade();
@@ -105,8 +105,8 @@ impl<T: ?Sized> RcCell<T> {
   /// Similar to [Rc::weak_count].
   /// Gets the number of [WeakCell] pointers to this allocation.
   /// # Examples
-  /// ```rust
-  /// use Mod::abstractions::RcCell;
+  /// ```ignore
+  /// use mod2lib::abstractions::RcCell;
   ///
   /// let x = RcCell::new(1);
   /// let weak_five = x.downgrade();
@@ -120,8 +120,8 @@ impl<T: ?Sized> RcCell<T> {
   /// Similar to [Rc::strong_count].
   /// Gets the number of strong ([RcCell]) pointers to this allocation.
   /// # Examples
-  /// ```rust
-  /// use Mod::abstractions::RcCell;
+  /// ```ignore
+  /// use mod2lib::abstractions::RcCell;
   ///
   /// let x = RcCell::new(1);
   /// let _y = x.clone();
@@ -135,8 +135,8 @@ impl<T: ?Sized> RcCell<T> {
   /// Similar to [Rc::ptr_eq].
   /// Returns `true` if two `RcCell`s point to the same allocation.
   /// # Examples
-  /// ```rust
-  /// use Mod::abstractions::RcCell;
+  /// ```ignore
+  /// use mod2lib::abstractions::RcCell;
   ///
   /// let x = RcCell::new(1);
   /// let xx = x.clone();
@@ -153,8 +153,8 @@ impl<T: ?Sized> RcCell<T> {
   /// Returns a [Ref] to the inner value if there is no [RefMut] pointing to the same allocation.
   /// Otherwise, it returns a `BorrowError`.
   /// # Examples
-  /// ```rust
-  /// use Mod::abstractions::RcCell;
+  /// ```ignore
+  /// use mod2lib::abstractions::RcCell;
   ///
   /// let x = RcCell::new(1);
   ///
@@ -169,8 +169,8 @@ impl<T: ?Sized> RcCell<T> {
   /// Returns a [RefMut] to the inner value if there is no [RefMut] nor [Ref] pointing to the same allocation.
   /// Otherwise, it returns a `BorrowMutError`.
   /// # Examples
-  /// ```rust
-  /// use Mod::abstractions::RcCell;
+  /// ```ignore
+  /// use mod2lib::abstractions::RcCell;
   ///
   /// let x = RcCell::new(1);
   ///
@@ -185,8 +185,8 @@ impl<T: ?Sized> RcCell<T> {
   /// Returns a [Ref] to the inner value if there is no [RefMut] pointing to the same allocation.
   /// Otherwise, it panics.
   /// # Examples
-  /// ```rust
-  /// use Mod::abstractions::RcCell;
+  /// ```ignore
+  /// use mod2lib::abstractions::RcCell;
   ///
   /// let x = RcCell::new(1);
   /// let x_ref = x.borrow();
@@ -199,8 +199,8 @@ impl<T: ?Sized> RcCell<T> {
   /// Returns a [RefMut] to the inner value if there is no [RefMut] nor [Ref] pointing to the same allocation.
   /// Otherwise, it panics.
   /// # Examples
-  /// ```rust
-  /// use Mod::abstractions::RcCell;
+  /// ```ignore
+  /// use mod2lib::abstractions::RcCell;
   ///
   /// let x = RcCell::new(1);
   /// let x_ref = x.borrow_mut();
@@ -266,8 +266,8 @@ impl<T> WeakCell<T> {
   /// Constructs a new `WeakCell<T>`, without allocating any memory.
   /// Calling [WeakCell::upgrade] on the return value always gives [None].
   /// # Examples
-  /// ```rust
-  /// use Mod::abstractions::WeakCell;
+  /// ```ignore
+  /// use mod2lib::abstractions::WeakCell;
   ///
   /// let empty: WeakCell<i32> = WeakCell::new();
   /// assert!(empty.upgrade().is_none());
@@ -283,8 +283,8 @@ impl<T: ?Sized> WeakCell<T> {
   /// Attempts to upgrade the `WeakCell` pointer to an `RcCell`.
   /// Returns `None` if the inner value has been dropped.
   /// # Examples
-  /// ```rust
-  /// use Mod::abstractions::RcCell;
+  /// ```ignore
+  /// use mod2lib::abstractions::RcCell;
   ///
   /// let five = RcCell::new(5);
   ///
