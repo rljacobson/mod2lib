@@ -13,16 +13,12 @@ mod rccell;
 mod string_join;
 
 // Logging
-// pub mod log;
+pub mod log;
 
 // A set of natural numbers
-pub use nat_set::NatSet;
 
 // Reference counted pointers with mutable stable, and complementary weak pointers.
-pub use rccell::{rc_cell, RcCell, WeakCell};
 
 // Interned string.
-pub use string_cache::DefaultAtom as IString;
 
 // Join sequences with a separator
-pub use string_join::{join_iter, join_string};

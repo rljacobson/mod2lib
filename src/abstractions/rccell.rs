@@ -54,7 +54,6 @@ macro_rules! rc_cell {
   };
 }
 
-pub use rc_cell;
 
 impl<T> RcCell<T> {
   /// Similar to [Rc::try_unwrap].
