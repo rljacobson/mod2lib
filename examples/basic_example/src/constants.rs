@@ -11,7 +11,7 @@ use mod2lib::api::atom::{
 
 declare_constant_newtype!(IntegerConstant, isize);
 declare_constant_newtype!(StringConstant, String);
-declare_constant_newtype!(FloatConstant, f64);
+// declare_constant_newtype!(FloatConstant, f64);
 declare_constant_newtype!(ByteConstant, u8);
 declare_constant_newtype!(BoolConstant, bool);
 

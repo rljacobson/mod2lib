@@ -146,7 +146,7 @@ impl NatSet {
   /// Returns the symmetric difference with the other specified bit vector.
   #[inline(always)]
   pub fn symmetric_difference(&self, other: &NatSet) -> NatSet {
-    let mut new_set = self.clone();
+    let new_set = self.clone();
     new_set.0.symmetric_difference(&other.0);
     new_set
   }

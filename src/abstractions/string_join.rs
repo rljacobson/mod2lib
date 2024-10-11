@@ -28,7 +28,7 @@ pub fn join_iter<T>(mut iter: impl Iterator<Item = T>, sep: impl Fn(&T) -> T)
 /// Join a list of things that can be displayed as string with a given separator.
 ///
 /// This is a convenience function that defers to `join_iter`.
-pub fn join_string<T:Display>(mut iter: impl Iterator<Item = T>, sep: &str) -> String {
+pub fn join_string<T:Display>(iter: impl Iterator<Item = T>, sep: &str) -> String {
   join_iter(iter.map(|t| t.to_string()), |_| sep.to_string()).collect::<String>()
 }
 
