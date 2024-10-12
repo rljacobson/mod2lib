@@ -11,14 +11,23 @@ module redirects to whatever chosen implementation we want.
 mod nat_set;
 mod rccell;
 mod string_join;
+mod heap;
 
 // Logging
 pub mod log;
 
-// A set of natural numbers
+// A set of (small) natural numbers
+pub use nat_set::NatSet;
 
 // Reference counted pointers with mutable stable, and complementary weak pointers.
+pub use rccell::{rc_cell, RcCell, WeakCell};
 
-// Interned string.
+// Interned string. Use `DefaultAtom` for a global cache that can be used across threads. Use `Atom` for a thread-local
+// string cache.
+pub use string_cache::DefaultAtom as IString;
 
 // Join sequences with a separator
+pub use string_join::{join_string, join_iter};
+
+// Heap construction/destruction
+pub use heap::{heap_construct, heap_destroy};

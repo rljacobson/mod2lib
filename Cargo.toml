@@ -13,8 +13,8 @@ publish     = false
 
 
 [dependencies]
-string_cache = "0.8.7" # String interning
-bit-set      = "0.8.0" # NatSet implementation
+string_cache = "0.8" # String interning
+bit-set      = "0.8" # NatSet implementation
 
 ## Logging ##
 tracing = "0.1"

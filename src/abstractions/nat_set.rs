@@ -13,37 +13,6 @@ pub struct NatSet(BitSet<u32>);
 pub type NatSetIterator<'a> = BitSetIterator<'a, u32>;
 
 impl NatSet {
-  /*
-    capacity
-      clear
-      contains
-      difference
-      difference_with
-    from_bit_vec
-    from_bytes
-    get_ref
-      insert
-      intersect_with
-      intersection
-    into_bit_vec
-      is_disjoint
-      is_empty
-      is_subset
-      is_superset
-      iter
-      len
-      new
-      remove
-      reserve_len
-      reserve_len_exact
-      shrink_to_fit
-      symmetric_difference
-      symmetric_difference_with
-      union
-      union_with
-      with_capacity
-  */
-
   #[inline(always)]
   pub fn clear(&mut self) {
     self.0.clear()
