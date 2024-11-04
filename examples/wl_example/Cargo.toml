@@ -1,0 +1,17 @@
+[package]
+name                 = "wl_example"
+description          = "An example of a Wolfram Language like language using mod2lib."
+authors.workspace    = true
+repository.workspace = true
+version.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+publish              = false
+
+
+[dependencies]
+mod2lib = { path = "../.." }
+
+paste.workspace = true
+total_float_wrap.workspace = true
+once_cell.workspace = true
