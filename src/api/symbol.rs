@@ -17,12 +17,64 @@ use crate::api::Arity;
 
 pub type SymbolPtr = *const Symbol;
 
+#[derive(Clone, Eq, PartialEq, Hash)]
 pub struct Symbol {
   pub name       : IString,
 
   pub arity      : Arity,
   pub attributes : SymbolAttributes,
-  pub symbol_type: SymbolType
+  pub symbol_type: SymbolType,
+
+  // ToDo: Can the `IString` value be used as the `hash_value`?
+  // Unique integer for comparing symbols, also called order.
+  // In Maude, the `order` has lower bits equal to the value of an integer that is incremented every time a symbol is
+  // created and upper 8 bits (bits 24..32) equal to the arity.
+  pub hash_value : u32,
+}
+
+impl Symbol {
+  pub fn new(name: IString, arity: Arity) -> Symbol {
+    let mut symbol = Symbol{
+      name,
+      arity,
+      attributes: SymbolAttributes::default(),
+      symbol_type: SymbolType::default(),
+      hash_value: 0,
+    };
+    symbol.compute_hash();
+    symbol
+  }
+
+
+  #[inline(always)]
+  pub fn is_variable(&self) -> bool {
+    self.symbol_type == SymbolType::Variable
+  }
+  
+  fn compute_hash(&mut self) -> u32 {
+    // In Maude, the hash value is the number (chronological order of creation) of the symbol OR'ed
+    // with (arity << 24). Here we swap the "number" with the hash of the IString as defined by the
+    // IString implementation.
+    
+    let arity: u32 = if let Arity::Value(v) = self.arity {
+      v as u32
+    } else { 
+      0
+    };
+
+    // ToDo: This… isn't great, because the hash is 32 bits, not 24, and isn't generated in numeric
+    //       order. However, it still produces a total order on symbols in which symbols are ordered first
+    //       by arity and then arbitrarily (by hash). Ordering by insertion order is just as arbitrary, so
+    //       it should be ok.
+    let hash = IString::get_hash(&self.name) | (arity << 24); // Maude: self.arity << 24
+    self.hash_value = hash;
+    hash
+  }
+  
+  /// Comparison based only on name and arity
+  pub fn compare(&self, other: &Symbol) -> std::cmp::Ordering {
+    self.hash_value.cmp(&other.hash_value)
+  }
 }
 
 impl Display for Symbol {

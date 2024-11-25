@@ -1,5 +1,8 @@
+#![feature(ptr_as_ref_unchecked)]
+
 pub mod api;
 mod abstractions;
+mod core;
 
 // We re-export abstractions that are meant to be used publicly.
 pub use abstractions::{

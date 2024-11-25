@@ -36,6 +36,9 @@ mod string_join;
 mod heap;
 pub(crate) mod erased;
 
+use std::collections::HashSet as StdHashSet;
+
+
 // Logging
 pub mod log;
 
@@ -56,5 +59,11 @@ pub(crate) use rccell::{rc_cell, RcCell, WeakCell};
 
 // Join sequences with a separator
 pub(crate) use string_join::{join_string, join_iter};
+
+
+/// A `ThingSet` is a hash set of `*const dyn Things`. They are useful if you need to test membership but never need
+/// to access the original `Thing`.
+pub type Set<T> = StdHashSet<T>; // This replaces Maude's `PointerSet` in most situations.
+
 
 // endregion

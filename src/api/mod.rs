@@ -1,8 +1,29 @@
+#![allow(unused_imports, dead_code)]
+/*!
+
+The public API of the library.
+
+*/
+
 pub mod atom;
 pub mod symbol;
 mod variable;
+mod term;
+pub(crate) mod dag_node;
+
+// Unimplemented Types
+#[derive(Default)]
+pub struct SymbolSet;
+pub struct Substitution;
+
+// Special Values
+// ToDo: Do UNDEFINED the right way. Is this great? No. But it's convenient.
+const UNDEFINED: i32 = -1;
+const NONE:      i32 = -1;
+const ROOT_OK:   i32 = -2;
 
 // Small utility types used throughout
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
 pub enum Arity {
   Unspecified,
   Variadic,
