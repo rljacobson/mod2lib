@@ -8,16 +8,72 @@ of structural sharing, the node instances themselves are not in 1-to-1 correspon
 
 */
 
-use std::cmp::Ordering;
+use std::{
+  collections::{
+    HashMap,
+    hash_map::Entry
+  },
+  cmp::Ordering,
+  ptr::NonNull,
+  sync::{
+    atomic::{
+      Ordering::Relaxed,
+      AtomicBool
+    },
+    Mutex
+  },
+};
+use std::cell::Cell;
 use enumflags2::{bitflags, BitFlags};
-use crate::abstractions::{NatSet, RcCell, Set};
-use crate::api::symbol::{Symbol, SymbolPtr};
-use crate::api::{Substitution, SymbolSet, UNDEFINED};
-use crate::api::dag_node::DagNode;
+use once_cell::sync::Lazy;
 
+use crate::{
+  abstractions::{NatSet, RcCell, Set},
+  api::{
+    Substitution,
+    SymbolSet,
+    UNDEFINED,
+    dag_node::{DagNode, DagNodeFlag, DagNodePtr},
+    free_theory::FreeTerm,
+    symbol::{Symbol, SymbolPtr}
+  },
+  core::sort::{Sort, SortPtr}
+};
+
+pub type BxTerm    = Box<Term>;
 pub type RcTerm    = RcCell<Term>;
-pub type MaybeTerm = Option<RcTerm>;
-pub type TermSet   = Set<RcTerm>;
+pub type MaybeTerm = Option<BxTerm>;
+pub type TermSet   = HashMap<u32, usize>;
+
+/*
+  static Vector<DagNode*> subDags;
+  static TermSet converted;
+  static bool setSortInfoFlag;
+*/
+static mut CONVERTED_TERMS: Lazy<TermSet> =  Lazy::new(|| {
+  TermSet::new()
+});
+
+static mut SUBDAG_CACHE : Lazy<Vec<DagNodePtr>> = Lazy::new(|| {
+  Vec::new()
+});
+
+static SET_SORT_INFO_FLAG: AtomicBool = AtomicBool::new(false);
+
+/// This trait holds the theory-specific parts of a term.
+pub trait TheoryTerm {
+  fn dagify(&self, parent: &Term) -> DagNodePtr;
+}
+
+
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub enum TermKind {
+  Free,
+  Bound,
+  Ground,
+  NonGround,
+}
 
 #[bitflags]
 #[repr(u8)]
@@ -40,29 +96,36 @@ pub type TermAttributes = BitFlags<TermAttribute, u8>;
 
 pub struct Term {
   /// The top symbol of the term
-  pub(crate) symbol:   SymbolPtr,
+  pub(crate) symbol: SymbolPtr,
+  pub(crate) sort  : Option<NonNull<SortPtr>>,
+  theory_term      : Box<dyn TheoryTerm>,
   /// The handles (indices) for the variable terms that occur in this term or its descendants
-  pub(crate) occurs_set:   NatSet,
-  pub(crate) context_set:  NatSet,
+  pub(crate) occurs_set      : NatSet,
+  pub(crate) context_set     : NatSet,
   pub(crate) collapse_symbols: SymbolSet,
-  pub(crate) attributes:   TermAttributes,
-  pub(crate) save_index:   i32, // NoneIndex = -1
-  // pub(crate) hash_value: u32,
+  pub(crate) attributes      : TermAttributes,
+  pub(crate) term_kind       : TermKind,
+  pub(crate) save_index      : i32,            // NoneIndex = -1
+  hash_value                 : u32,
+
   /// The number of nodes in the term tree
-  pub(crate) cached_size:  i32,
+  pub(crate) cached_size:  Cell<i32>,
 }
 
 impl Term {
   pub fn new(symbol: SymbolPtr) -> Term {
     Term {
-      symbol:   symbol,
-      occurs_set:   Default::default(),
-      context_set:  Default::default(),
+      symbol,
+      sort            : None,
+      theory_term     : Box::new(FreeTerm::new()),
+      occurs_set      : Default::default(),
+      context_set     : Default::default(),
       collapse_symbols: Default::default(),
-      attributes:   TermAttributes::default(),
-      save_index:   0,
-      // hash_value: 0,
-      cached_size:  UNDEFINED,
+      attributes      : TermAttributes::default(),
+      term_kind       : TermKind::Free,
+      save_index      : 0,
+      hash_value      : 0,
+      cached_size     : Cell::new(UNDEFINED),
     }
   }
 
@@ -114,22 +177,48 @@ impl Term {
     self.occurs_set.is_empty()
   }
 
+  /// The handles (indices) for the variable terms that occur in this term or its descendants
+  #[inline(always)]
+  fn occurs_below(&self) -> &NatSet {
+    &self.occurs_set
+  }
+
+  #[inline(always)]
+  fn occurs_below_mut(&mut self) -> &mut NatSet {
+    &mut self.occurs_set
+  }
+
+  #[inline(always)]
+  fn occurs_in_context(&self) -> &NatSet {
+    &self.context_set
+  }
+
+  #[inline(always)]
+  fn occurs_in_context_mut(&mut self) -> &mut NatSet {
+    &mut self.context_set
+  }
+
+  #[inline(always)]
+  fn collapse_symbols(&self) -> &SymbolSet {
+    &self.collapse_symbols
+  }
+
   /// Returns an iterator over the arguments of the term
-  fn iter_args(&self) -> Box<dyn Iterator<Item = RcTerm> + '_>{
+  fn iter_args(&self) -> Box<dyn Iterator<Item = &Term> + '_>{
     // Box::new(std::iter::empty::<RcTerm>())
     unimplemented!("Implement empty iterator as Box::new(std::iter::empty::<RcTerm>())")
   }
 
   /// Compute the number of nodes in the term tree
-  fn compute_size(&mut self) -> i32 {
-    if self.cached_size != UNDEFINED {
-      self.cached_size
+  fn compute_size(&self) -> i32 {
+    if self.cached_size.get() != UNDEFINED {
+      self.cached_size.get()
     } else {
       let mut size = 1; // Count self.
       for arg in self.iter_args() {
-        size += arg.borrow_mut().compute_size();
+        size += arg.compute_size();
       }
-      self.cached_size = size;
+      self.cached_size.set(size);
       size
     }
   }
@@ -204,4 +293,52 @@ impl Term {
 
   // endregion
 
+
+  // region DAG Creation
+
+  #[inline(always)]
+  fn term_to_dag(&self, set_sort_info: bool) -> DagNodePtr {
+    SET_SORT_INFO_FLAG.store(set_sort_info, Relaxed);
+    unsafe { SUBDAG_CACHE.clear(); }
+    unsafe { CONVERTED_TERMS.clear(); }
+    self.dagify()
+  }
+
+  /// Create a directed acyclic graph from this term. This trait-level implemented function takes care of structural
+  /// sharing. Each implementing type will supply its own implementation of `dagify_aux(…)`, which recursively
+  /// calls `dagify(…)` on its children and then converts itself to a type implementing DagNode, returning `DagNodePtr`.
+  fn dagify(&self) -> DagNodePtr {
+    if let Entry::Occupied(occupied_entry) = unsafe{ CONVERTED_TERMS.entry(self.semantic_hash()) } {
+      let idx = *occupied_entry.get();
+      return unsafe{ SUBDAG_CACHE[idx] };
+    }
+
+    let mut d = self.dagify_aux();
+    if SET_SORT_INFO_FLAG.load(Relaxed) {
+      assert_ne!(
+        self.sort,
+        None,
+        "Missing sort info"
+      );
+      let mut d_mut: &mut DagNode = unsafe{ &mut *d };
+      d_mut.sort = self.sort;
+      d_mut.flags.insert(DagNodeFlag::Reduced.into());
+    }
+
+    let idx = unsafe{ SUBDAG_CACHE.len() };
+    unsafe{ SUBDAG_CACHE.push(d) };
+    // sub_dags.insert(self_hash, d.clone());
+    unsafe{ CONVERTED_TERMS.insert(self.semantic_hash(), idx) };
+    d
+  }
+
+  /// Create a directed acyclic graph from this term. This method has the implementation-specific stuff.
+  fn dagify_aux(&self) -> DagNodePtr{
+    self.theory_term.dagify(self)
+  }
+
+  // endregion
+
 }
+
+

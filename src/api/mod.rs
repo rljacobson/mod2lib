@@ -8,8 +8,9 @@ The public API of the library.
 pub mod atom;
 pub mod symbol;
 mod variable;
-mod term;
+pub(crate) mod term;
 pub(crate) mod dag_node;
+pub mod free_theory;
 
 // Unimplemented Types
 #[derive(Default)]
@@ -25,7 +26,10 @@ const ROOT_OK:   i32 = -2;
 // Small utility types used throughout
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
 pub enum Arity {
+  Any,
+  None,
   Unspecified,
+
   Variadic,
   Value(i16)
 }
@@ -33,9 +37,15 @@ pub enum Arity {
 impl From<Arity> for i16 {
   fn from(arity: Arity) -> Self {
     match arity {
-      Arity::Unspecified => -2,
-      Arity::Variadic => -1,
+
+      Arity::None
+      | Arity::Unspecified => -2,
+
+      Arity::Any
+      | Arity::Variadic => -1,
+
       Arity::Value(val) => val
+
     }
   }
 }

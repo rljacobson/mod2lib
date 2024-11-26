@@ -23,7 +23,7 @@ use std::{
   cmp::max,
   marker::PhantomPinned
 };
-
+use std::ptr::NonNull;
 use enumflags2::{bitflags, make_bitflags, BitFlags};
 
 use crate::{
@@ -37,6 +37,7 @@ use crate::{
   }
 };
 use crate::api::Arity;
+use crate::core::sort::SortPtr;
 
 pub type DagNodePtr = *mut DagNode;
 // pub type DagNodeMutPtr = *mut DagNode;
@@ -105,10 +106,11 @@ pub enum DagNodeArgument{
 
 
 pub struct DagNode {
-  pub(crate) symbol: SymbolPtr,
-  args: DagNodeArgument,
-  pub kind:   DagNodeKind,
-  pub flags:  DagNodeFlags,
+  pub(crate) symbol   : SymbolPtr,
+  pub(crate) args     : DagNodeArgument,
+  pub(crate) sort     : Option<NonNull<SortPtr>>,
+  pub(crate) node_kind: DagNodeKind,
+  pub(crate) flags    : DagNodeFlags,
 
   // Opt out of `Unpin`
   _pin: PhantomPinned,
@@ -130,16 +132,18 @@ impl DagNode {
     let arity = match unsafe{ &*symbol }.arity {
       // ToDo: How do we allocate a NodeVec for variadic nodes?
       | Arity::Unspecified
+      | Arity::Any
+      | Arity::None
       | Arity::Variadic => 0,
 
       Arity::Value(v) => v as usize,
 
     };
 
-    node_mut.kind   = kind;
-    node_mut.flags  = DagNodeFlags::empty();
-    node_mut.symbol = symbol;
-    node_mut.args   = if arity > 1 {
+    node_mut.node_kind = kind;
+    node_mut.flags     = DagNodeFlags::empty();
+    node_mut.symbol    = symbol;
+    node_mut.args      = if arity > 1 {
       DagNodeArgument::Many(NodeVector::with_capacity(arity))
     } else {
       DagNodeArgument::None
@@ -152,9 +156,9 @@ impl DagNode {
     let node: DagNodePtr = { allocate_dag_node() };
     let node_mut         = unsafe { &mut *node };
 
-    node_mut.kind   = kind;
-    node_mut.flags  = DagNodeFlags::empty();
-    node_mut.symbol = symbol;
+    node_mut.node_kind = kind;
+    node_mut.flags     = DagNodeFlags::empty();
+    node_mut.symbol    = symbol;
 
     // ToDo: How do we allocate a NodeVec for variadic nodes?
     let arity = if let Arity::Value(v) = unsafe{ &*symbol }.arity { v as usize } else { 0 };

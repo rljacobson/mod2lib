@@ -34,9 +34,12 @@ mod nat_set;
 mod rccell;
 mod string_join;
 mod heap;
+pub(crate) mod hash;
 pub(crate) mod erased;
+pub(crate) mod graph;
 
 use std::collections::HashSet as StdHashSet;
+use std::collections::HashMap as StdHashMap;
 
 
 // Logging
@@ -45,9 +48,10 @@ pub mod log;
 // Interned string. Use `DefaultAtom` for a global cache that can be used across threads. Use `Atom` for a thread-local
 // string cache.
 pub use string_cache::DefaultAtom as IString;
+// pub use ustr::Ustr as IString;
 
 // Heap construction/destruction
-// pub use heap::{heap_construct, heap_destroy};
+pub use heap::{heap_construct, heap_destroy};
 
 // region Items meant to be used only internally
 
@@ -64,6 +68,8 @@ pub(crate) use string_join::{join_string, join_iter};
 /// A `ThingSet` is a hash set of `*const dyn Things`. They are useful if you need to test membership but never need
 /// to access the original `Thing`.
 pub type Set<T> = StdHashSet<T>; // This replaces Maude's `PointerSet` in most situations.
+
+pub type HashMap<S, T> = StdHashMap<S, T>;
 
 
 // endregion

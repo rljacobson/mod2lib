@@ -11,11 +11,18 @@ the symbol `Integer` for example.
 */
 
 use std::fmt::Display;
-use enumflags2::{bitflags, make_bitflags, BitFlags};
-use crate::abstractions::IString;
-use crate::api::Arity;
 
-pub type SymbolPtr = *const Symbol;
+use enumflags2::{bitflags, make_bitflags, BitFlags};
+
+use crate::{
+  abstractions::IString,
+  api::Arity
+};
+use crate::abstractions::Set;
+
+pub type SymbolPtr = *mut Symbol;
+pub type SymbolSet = Set<Symbol>;
+
 
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct Symbol {
@@ -50,15 +57,15 @@ impl Symbol {
   pub fn is_variable(&self) -> bool {
     self.symbol_type == SymbolType::Variable
   }
-  
+
   fn compute_hash(&mut self) -> u32 {
     // In Maude, the hash value is the number (chronological order of creation) of the symbol OR'ed
     // with (arity << 24). Here we swap the "number" with the hash of the IString as defined by the
     // IString implementation.
-    
+
     let arity: u32 = if let Arity::Value(v) = self.arity {
       v as u32
-    } else { 
+    } else {
       0
     };
 
@@ -66,11 +73,11 @@ impl Symbol {
     //       order. However, it still produces a total order on symbols in which symbols are ordered first
     //       by arity and then arbitrarily (by hash). Ordering by insertion order is just as arbitrary, so
     //       it should be ok.
-    let hash = IString::get_hash(&self.name) | (arity << 24); // Maude: self.arity << 24
+    let hash = (IString::get_hash(&self.name) & 0x00FFFFFF) | (arity << 24); // Maude: self.arity << 24
     self.hash_value = hash;
     hash
   }
-  
+
   /// Comparison based only on name and arity
   pub fn compare(&self, other: &Symbol) -> std::cmp::Ordering {
     self.hash_value.cmp(&other.hash_value)

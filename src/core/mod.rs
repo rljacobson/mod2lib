@@ -21,7 +21,10 @@ The following compares Maude's `DagNode` to our implementation here.
 
 
 mod root_container;
-pub mod allocator;
+pub(crate) mod allocator;
+pub mod sort;
+pub mod module;
+pub mod pre_equation;
 
 #[allow(unused_imports)]
 pub use root_container::RootContainer;

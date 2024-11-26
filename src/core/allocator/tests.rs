@@ -10,7 +10,7 @@ use crate::{
   core::allocator::*,
   core::RootContainer
 };
-
+use crate::api::symbol::SymbolPtr;
 /*
 Recursively builds a random tree of `DagNode`s with a given height and arity rules.
 
@@ -22,7 +22,7 @@ the building of the tree. Run the GC before or after.
  - `max_height`: Maximum allowed height for the tree.
 */
 pub fn build_random_tree(
-  symbols   : &[Symbol],
+  symbols: &mut [Symbol],
   parent    : DagNodePtr,
   max_height: usize,
   max_width : usize,
@@ -51,7 +51,7 @@ pub fn build_random_tree(
     };
 
     // Create the child node with the symbol corresponding to its arity
-    let child_symbol = &symbols[child_arity];
+    let child_symbol: SymbolPtr = &mut symbols[child_arity];
     let child_node   = DagNode::new(child_symbol);
 
     // Insert the child into the parent node
@@ -121,20 +121,20 @@ fn test_allocate_dag_node() {
     Some(node) => { node }
   };
 
-  node_mut.kind = DagNodeKind::Free;
+  node_mut.node_kind = DagNodeKind::Free;
 }
 
 
 #[test]
 fn test_dag_creation() {
-  let symbols = (0..=10)
+  let mut symbols = (0..=10)
       .map(|x| {
         let name = IString::from(format!("sym({})", x).as_str());
         Symbol::new(name, Arity::Value(x))
       })
       .collect::<Vec<_>>();
 
-  let root = DagNode::new(&symbols[3]);
+  let root = DagNode::new(&mut symbols[3]);
   let _root_container = RootContainer::new(root);
 
   // Maximum tree height
@@ -142,16 +142,17 @@ fn test_dag_creation() {
   let max_width : usize = 3;
 
   // Recursively build the random tree
-  build_random_tree(&symbols, root, max_height, max_width, 0);
+  build_random_tree(&mut symbols, root, max_height, max_width, 0);
   print_tree(root, String::new(), false);
   // println!("Symbols: {:?}", symbols);
+  #[cfg(gc_debug)]
   acquire_node_allocator("dump_memory_variables").dump_memory_variables()
 }
 
 
 #[test]
 fn test_garbage_collection() {
-  let symbols = (0..=10)
+  let mut symbols = (0..=10)
       .map(|x| {
         let name = IString::from(format!("sym({})", x).as_str());
         Symbol::new(name, Arity::Value(x))
@@ -162,7 +163,7 @@ fn test_garbage_collection() {
     let mut root_vec = Vec::with_capacity(10);
 
     for _ in 0..10 {
-      let root: DagNodePtr = DagNode::new(&symbols[4]);
+      let root: DagNodePtr = DagNode::new(&mut symbols[4]);
       let root_container = RootContainer::new(root);
       root_vec.push(root_container);
 
@@ -171,12 +172,13 @@ fn test_garbage_collection() {
       let max_width : usize = 4; // base
 
       // Recursively build the random tree
-      build_random_tree(&symbols, root, max_height, max_width, 0);
+      build_random_tree(&mut symbols, root, max_height, max_width, 0);
     }
     { acquire_node_allocator("ok_to_collect_garbage").ok_to_collect_garbage(); }
 
     // root_vec dropped
   }
+  #[cfg(gc_debug)]
   acquire_node_allocator("dump_memory_variables").dump_memory_variables()
 }
 
@@ -206,7 +208,7 @@ fn test_arena_exhaustion() {
       (&mut*last_node).insert_child(node_ptr).expect("Could not insert child");
     }
     last_node     = node_ptr;
-    node_mut.kind = DagNodeKind::Free;
+    node_mut.node_kind = DagNodeKind::Free;
   }
 
 }
