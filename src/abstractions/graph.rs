@@ -65,11 +65,11 @@ impl Graph {
   fn find_components(&self, components: &mut Vec<Vec<i32>>) {
     let mut visited = NatSet::new();
     let node_count = self.adj_sets.len();
-    for i in 0..node_count {
+    for i in 0..node_count as u8 {
       if !visited.contains(i) {
         let component_count = components.len();
         components.push(Vec::new());
-        self.visit(i, &mut components[component_count], &mut visited);
+        self.visit(i as usize, &mut components[component_count], &mut visited);
       }
     }
   }
@@ -79,8 +79,8 @@ impl Graph {
     component.push(i as i32);
     let adj_set = &self.adj_sets[i];
     for j in adj_set.iter() {
-      if !visited.contains(j as usize) {
-        self.visit(j as usize, component, visited);
+      if !visited.contains(j as u8) {
+        self.visit(j, component, visited);
       }
     }
   }

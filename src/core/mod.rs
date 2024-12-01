@@ -18,13 +18,26 @@ The following compares Maude's `DagNode` to our implementation here.
 
 */
 
-
-
 mod root_container;
 pub(crate) mod allocator;
 pub mod sort;
 pub mod module;
 pub mod pre_equation;
+pub mod term_core;
+pub mod format;
+pub(crate) mod dag_node_core;
+pub(crate) mod substitution;
+pub(crate) mod local_bindings;
+pub(crate) mod narrowing_variable_info;
+pub(crate) mod variable_info;
+
+
+// Reexports to flatten some of the smaller modules
+pub(crate) use local_bindings::LocalBindings;
+pub(crate) use narrowing_variable_info::NarrowingVariableInfo;
+pub(crate) use variable_info::VariableInfo;
+
+
 
 #[allow(unused_imports)]
 pub use root_container::RootContainer;
@@ -32,28 +45,14 @@ pub use root_container::RootContainer;
 /// A `*mut Void` is a pointer to a `u8`
 pub type Void = u8;
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Default)]
-pub enum DagNodeKind {
-  #[default]
-  Free = 0,
-  ACU,
-  AU,
-  CUI,
-  Variable,
-  NA,
-  Data,
-  // Integer,
-  // Float
-}
 
 #[cfg(test)]
 mod tests {
   use crate::{
-    api::dag_node::{
-      DagNodeKind,
+    core::dag_node_core::{
+      DagNodeTheory,
       DagNodeFlags,
-      DagNode,
-      DagNodeArgument
+      DagNodeCore
     },
     api::symbol::SymbolPtr
   };
@@ -61,10 +60,9 @@ mod tests {
   #[test]
   fn size_of_dag_node() {
     println!("size of SymbolPtr: {}", size_of::<SymbolPtr>());
-    println!("size of DagNodeArgument: {}", size_of::<DagNodeArgument>());
-    println!("size of DagNodeKind: {}", size_of::<DagNodeKind>());
+    println!("size of DagNodeKind: {}", size_of::<DagNodeTheory>());
     println!("size of DagNodeFlags: {}", size_of::<DagNodeFlags>());
-    println!("size of DagNode: {}", size_of::<DagNode>());
-    assert_eq!(size_of::<DagNode>(), 4 * size_of::<usize>());
+    println!("size of DagNode: {}", size_of::<DagNodeCore>());
+    assert_eq!(size_of::<DagNodeCore>(), 3 * size_of::<usize>());
   }
 }

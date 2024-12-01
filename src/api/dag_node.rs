@@ -1,335 +1,433 @@
 /*!
 
-The `DagNode` is the heart of the engine. Speed hinges on efficient management of `DagNode` objects. Their creation,
-reuse, and destruction are managed by an arena based garbage collecting allocator which relies on the fact that
-every `DagNode` is of the same size. Since `DagNode`s can be of different types and have arguments, we make careful use
-of transmute and bitflags.
+The `DagNode` trait is the interface all DAG node's must implement.
 
-The following compares Maude's `DagNode` to our implementation here.
-
-|                | Maude                                        | mod2lib                  |
-|:---------------|:---------------------------------------------|:-------------------------|
-| size           | Fixed 3 word size                            | Fixed size struct        |
-| tag            | implicit via vtable pointer                  | enum variant             |
-| flags          | `MemoryInfo` in first word                   | `BitFlags` field         |
-| shared impl    | base class impl                              | enum impl                |
-| specialization | virtual function calls                       | match on variant in impl |
-| args           | `reinterpret_cast` of 2nd word based on flag | Nested enum              |
+Requirements of implementers of `DagNode`:
+ 1. DAG nodes should be newtypes of `DagNodeCore`. In particular...
+ 2. DAG nodes *must* have the same memory representation as a `DagNodeCore`.
+ 3. Implementers of `DagNode` are responsible for casting pointers, in particular its arguments.
 
 */
 
 use std::{
+  rc::Rc,
   fmt::{Display, Formatter},
-  cmp::max,
-  marker::PhantomPinned
+  cmp::Ordering,
+  any::Any,
+  iter::Iterator
 };
-use std::ptr::NonNull;
-use enumflags2::{bitflags, make_bitflags, BitFlags};
-
+use std::cmp::max;
 use crate::{
-  api::symbol::{Symbol, SymbolPtr},
+  api::{
+    Arity,
+    symbol::{Symbol, SymbolPtr}
+  },
   core::{
     allocator::{
-      allocate_dag_node,
-      increment_active_node_count,
-      node_vector::{NodeVector, NodeVectorMutRef}
-    }
+      gc_vector::{GCVector, GCVectorRefMut},
+      increment_active_node_count
+    },
+    dag_node_core::{
+      DagNodeCore,
+      DagNodeFlag,
+      DagNodeFlags,
+      ThinDagNodePtr
+    },
+    sort::{SortPtr, SpecialSort}
   }
 };
-use crate::api::Arity;
-use crate::core::sort::SortPtr;
+use crate::core::format::{FormatStyle, Formattable};
 
-pub type DagNodePtr = *mut DagNode;
-// pub type DagNodeMutPtr = *mut DagNode;
+// A fat pointer to a trait object. For a thin pointer to a DagNodeCore, use ThinDagNodePtr
+pub type DagNodePtr    = *mut dyn DagNode;
+pub type DagNodeVector = GCVector<DagNodePtr>;
+pub type DagNodeVectorRefMut = GCVectorRefMut<DagNodePtr>;
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Default, Hash)]
-pub enum DagNodeKind {
-  #[default]
-  Free = 0,
-  ACU,
-  AU,
-  CUI,
-  Variable,
-  NA,
-  Data,
-  // Integer,
-  // Float
-}
-
-#[bitflags]
-#[repr(u8)]
-#[derive(Copy, Clone, Eq, PartialEq)]
-pub enum DagNodeFlag {
-  /// Marked as in use
-  Marked,
-  /// Has args that need destruction
-  NeedsDestruction,
-  /// Reduced up to strategy by equations
-  Reduced,
-  /// Copied in current copy operation; copyPointer valid
-  Copied,
-  /// Reduced and not rewritable by rules
-  Unrewritable,
-  /// Unrewritable and all subterms unstackable or frozen
-  Unstackable,
-  /// No variables occur below this node
-  GroundFlag,
-  /// Node has a valid hash value (storage is theory dependent)
-  HashValid,
-}
-impl DagNodeFlag {
-  #![allow(non_upper_case_globals)]
-
-  /// An alias - We can share the same bit for this flag since the rule rewriting
-  /// strategy that needs `Unrewritable` will never be combined with variant narrowing.
-  pub const IrreducibleByVariantEquations: DagNodeFlag = DagNodeFlag::Unrewritable;
-
-  // Conjunctions
-
-  /// Flags for rewriting
-  pub const RewritingFlags: DagNodeFlags = make_bitflags!(
-    DagNodeFlag::{
-      Reduced | Unrewritable | Unstackable | GroundFlag
-    }
-  );
-}
-
-pub type DagNodeFlags = BitFlags<DagNodeFlag, u8>;
-
-#[derive(Default)]
-pub enum DagNodeArgument{
-  #[default]
-  None,
-  Single(DagNodePtr),
-  Many(NodeVectorMutRef)
+/// Commutative theories can have this more compact representation
+#[derive(Copy, Clone)]
+pub struct DagPair {
+  pub(crate) dag_node    : DagNodePtr,
+  pub(crate) multiplicity: u8,
 }
 
 
-pub struct DagNode {
-  pub(crate) symbol   : SymbolPtr,
-  pub(crate) args     : DagNodeArgument,
-  pub(crate) sort     : Option<NonNull<SortPtr>>,
-  pub(crate) node_kind: DagNodeKind,
-  pub(crate) flags    : DagNodeFlags,
+pub trait DagNode {
 
-  // Opt out of `Unpin`
-  _pin: PhantomPinned,
-}
+  fn as_any(&self) -> &dyn Any;
+  // {
+  //   self
+  // }
 
+  fn as_any_mut(&mut self) -> &mut dyn Any;
+  // {
+  //   self
+  // }
 
-impl DagNode {
-  // region Constructors
-
-  pub fn new(symbol: SymbolPtr) -> DagNodePtr {
-    DagNode::with_kind(symbol, DagNodeKind::default())
+  #[inline(always)]
+  fn as_ptr_mut(&self) -> *mut dyn DagNode where Self: Sized {
+    let ptr: *const dyn DagNode = self;
+    ptr as *mut dyn DagNode
   }
 
-  pub fn with_kind(symbol: SymbolPtr, kind: DagNodeKind) -> DagNodePtr {
-    assert!(!symbol.is_null());
-    let node: DagNodePtr = allocate_dag_node();
-    let node_mut         = unsafe { &mut *node };
-
-    let arity = match unsafe{ &*symbol }.arity {
-      // ToDo: How do we allocate a NodeVec for variadic nodes?
-      | Arity::Unspecified
-      | Arity::Any
-      | Arity::None
-      | Arity::Variadic => 0,
-
-      Arity::Value(v) => v as usize,
-
-    };
-
-    node_mut.node_kind = kind;
-    node_mut.flags     = DagNodeFlags::empty();
-    node_mut.symbol    = symbol;
-    node_mut.args      = if arity > 1 {
-      DagNodeArgument::Many(NodeVector::with_capacity(arity))
-    } else {
-      DagNodeArgument::None
-    };
-    node
-  }
-
-  pub fn with_args(symbol: SymbolPtr, args: &mut Vec<DagNodePtr>, kind: DagNodeKind) -> DagNodePtr {
-    assert!(!symbol.is_null());
-    let node: DagNodePtr = { allocate_dag_node() };
-    let node_mut         = unsafe { &mut *node };
-
-    node_mut.node_kind = kind;
-    node_mut.flags     = DagNodeFlags::empty();
-    node_mut.symbol    = symbol;
-
-    // ToDo: How do we allocate a NodeVec for variadic nodes?
-    let arity = if let Arity::Value(v) = unsafe{ &*symbol }.arity { v as usize } else { 0 };
-
-    if arity > 1 || args.len() > 1 {
-      let capacity = max(arity, args.len());
-      let node_vector = NodeVector::with_capacity(capacity);
-
-      for node in args.iter().cloned() {
-        _  = node_vector.push(node);
-      }
-
-      node_mut.args = DagNodeArgument::Many(node_vector);
-    }
-    else if args.len() == 1 {
-      node_mut.args = DagNodeArgument::Single(args[0]);
-    } else {
-      node_mut.args = DagNodeArgument::None;
-    };
-
-    node
-  }
-
-  // endregion Constructors
 
   // region Accessors
 
-  pub fn iter_children(&self) -> std::slice::Iter<'static, DagNodePtr> {
+  /// Trait level access to members for shared implementation
+  fn core(&self) -> &DagNodeCore;
+  fn core_mut(&mut self) -> &mut DagNodeCore;
+
+  #[inline(always)]
+  fn arity(&self) -> Arity {
+    if self.symbol().is_null() {
+      panic!("symbol is null")
+    }
+    self.symbol_ref().arity
+  }
+
+
+  /// MUST override if Self::args is not a `DagNodeVector`
+  fn iter_args(&self) -> Box<dyn Iterator<Item=DagNodePtr>> {
     // For assertions
     // ToDo: These assertions will need to change for variadic nodes.
     let arity = if let Arity::Value(v) = self.arity() { v } else { 0 };
 
-    match &self.args {
-      DagNodeArgument::None => {
-        assert_eq!(arity, 0);
-        [].iter()
-      }
-      DagNodeArgument::Single(node) => {
-        assert_eq!(arity, 1);
-        // Make a fat pointer to the single node and return an iterator to it. This allows `self` to
-        // escape the method. Of course, `self` actually points to a `DagNode` that is valid for the
-        // lifetime of the program, so even in the event of the GC equivalent of a dangling pointer
-        // or use after free, this will be safe. (Strictly speaking, it's probably UB.)
-        let v = unsafe { std::slice::from_raw_parts(node, 1) };
-        v.iter()
-      }
-      DagNodeArgument::Many(node_vector) => {
-        assert!(arity>1);
-        // We need to allow `self` to escape the method, same as `Single(..)` branch.
-        let node_vector_ptr: *const NodeVector = *node_vector;
-        unsafe{ &*node_vector_ptr }.iter()
-      }
+    // The empty case
+    if self.core().args.is_null() {
+      assert_eq!(arity, 0);
+      Box::new(std::iter::empty())
+    } // The vector case
+    else if self.core().needs_destruction() {
+      assert!(arity>1);
+
+      let node_vector: DagNodeVectorRefMut = arg_to_node_vec(self.core().args);
+      Box::new(node_vector.iter().cloned())
+    } // The singleton case
+    else {
+      assert_eq!(arity, 1);
+
+      let node = arg_to_dag_node(self.core().args);
+
+      // Make a fat pointer to the single node and return an iterator to it. This allows `self` to
+      // escape the method. Of course, `self` actually points to a `DagNode` that is valid for the
+      // lifetime of the program, so even in the event of the GC equivalent of a dangling pointer
+      // or use after free, this will be safe. (Strictly speaking, it's probably UB.)
+      let v = unsafe { std::slice::from_raw_parts(&node, 1) };
+      Box::new(v.iter().map(|n| *n))
     }
   }
 
-  #[inline(always)]
-  pub fn symbol(&self) -> &Symbol {
-    unsafe {
-      &*self.symbol
-    }
-  }
-
-  #[inline(always)]
-  pub fn arity(&self) -> Arity {
-    self.symbol().arity
-  }
-
-  #[inline(always)]
-  pub fn len(&self) -> usize {
-    match &self.args {
-      DagNodeArgument::None      => 0,
-      DagNodeArgument::Single(_) => 1,
-      DagNodeArgument::Many(v)   => v.len()
-    }
-  }
-
-  pub fn insert_child(&mut self, new_child: DagNodePtr) -> Result<(), String>{
+  /// MUST override if Self::args is not a `DagNodeVector`
+  fn insert_child(&mut self, new_child: DagNodePtr){
     assert!(!new_child.is_null());
+    // ToDo: Should we signal if arity is exceeded and/or DagNodeVector needs to reallocate?
 
-    match self.args {
+    // Empty case
+    if self.core().args.is_null() {
+      self.core_mut().args = new_child as *mut u8;
+    } // Vector case
+    else if self.core().needs_destruction() {
+      let node_vec: DagNodeVectorRefMut = arg_to_node_vec(self.core_mut().args);
+      node_vec.push(new_child)
+    } // Singleton case
+    else {
+      let existing_child = arg_to_dag_node(self.core_mut().args);
+      let arity = if let Arity::Value(arity) = self.arity() {
+        max(arity, 2)
+      } else {
+        2
+      };
+      let node_vec   = DagNodeVector::with_capacity(arity as usize);
 
-      DagNodeArgument::None => {
-        self.args = DagNodeArgument::Single(new_child);
-        Ok(())
-      }
+      node_vec.push(existing_child);
+      node_vec.push(new_child);
 
-      DagNodeArgument::Single(first_child) => {
-        let vec   = NodeVector::from_slice(&[first_child, new_child]);
-        self.args = DagNodeArgument::Many(vec);
-        Ok(())
-      }
-
-      DagNodeArgument::Many(ref mut vec) => {
-        vec.push(new_child)
-      }
-
+      // Take ownership
+      self.set_flags(DagNodeFlag::NeedsDestruction.into());
+      self.core_mut().args = (node_vec as *mut DagNodeVector) as *mut u8;
     }
+  }
+
+
+  /// Gives the top symbol of this term.
+  #[inline(always)]
+  fn symbol(&self) -> SymbolPtr {
+    self.core().symbol
+  }
+
+
+  /// Convenience method that gets and dereferences the symbol
+  #[inline(always)]
+  fn symbol_ref(&self) -> &Symbol {
+    unsafe{ &*self.core().symbol }
+  }
+
+
+  // Todo: Is this needed?
+  #[inline(always)]
+  fn symbol_ref_mut(&mut self) -> &mut Symbol {
+    unsafe{ &mut *self.core().symbol }
+  }
+
+
+  // ToDo: Implement DagNodeCore::get_sort() when `SortTable` is implemented.
+  #[inline(always)]
+  fn get_sort(&self) -> Option<SortPtr> {
+    unimplemented!()
+    /*
+    let sort_index: i8 = self.sort_index();
+    match sort_index {
+      n if n == SpecialSort::Unknown as i8 => None,
+
+      // Anything else
+      sort_index => {
+        self
+            .dag_node_members()
+            .top_symbol
+            .sort_table()
+            .range_component()
+            .borrow()
+            .sort(sort_index)
+            .upgrade()
+      }
+    }
+    */
+  }
+
+
+  #[inline(always)]
+  fn set_sort_index(&mut self, sort_index: i8) {
+    self.core_mut().sort_index = sort_index;
+  }
+
+
+  #[inline(always)]
+  fn sort_index(&self) -> i8 {
+    self.core().sort_index
+  }
+
+
+  /// Set the sort to best of original and other sorts
+  #[inline(always)]
+  fn upgrade_sort_index(&mut self, other: DagNodePtr) {
+    let other = unsafe{ &*other };
+    //  We set the sort to best of original and other sorts; that is:
+    //    SORT_UNKNOWN, SORT_UNKNOWN -> SORT_UNKNOWN
+    //    SORT_UNKNOWN, valid-sort -> valid-sort
+    //    valid-sort, SORT_UNKNOWN -> valid-sort
+    //    valid-sort,  valid-sort -> valid-sort
+    //
+    //  We can do it with a bitwise AND trick because valid sorts should
+    //  always be in agreement and SORT_UNKNOWN is represented by -1, i.e.
+    //  all 1 bits.
+    self.set_sort_index(self.sort_index() & other.sort_index())
+  }
+
+
+  /// MUST be overriden if `Self::args` is not a `DagNodeVec`
+  fn len(&self) -> usize {
+    // The empty case
+    if self.core().args.is_null() {
+      0
+
+    } // The vector case
+    else if self.core().needs_destruction() {
+      // We need to allow `self` to escape the method, same as `Single(..)` branch.
+      let node_vector: DagNodeVectorRefMut = arg_to_node_vec(self.core().args);
+
+      node_vector.len()
+
+    } // The singleton case
+    else {
+      1
+    }
+  }
+
+
+  #[inline(always)]
+  fn flags(&self) -> DagNodeFlags {
+    self.core().flags
+  }
+
+  #[inline(always)]
+  fn set_reduced(&mut self) {
+    self.core_mut().flags.insert(DagNodeFlag::Reduced);
+  }
+
+  #[inline(always)]
+  fn set_flags(&mut self, flags: DagNodeFlags) {
+    self.core_mut().flags.insert(flags);
+  }
+
+  // endregion Accessors
+
+  // region Comparison
+
+  /// Defines a partial order on `DagNode`s by comparing the symbols and the arguments recursively.
+  fn compare(&self, other: DagNodePtr) -> Ordering {
+    let other_ref = unsafe{ &*other };
+    let symbol_order = self.symbol_ref().compare(other_ref.symbol_ref());
+
+    match symbol_order {
+      Ordering::Equal => self.compare_arguments(other),
+      _ => symbol_order,
+    }
+  }
+
+  /// MUST be overridden is `Self::args` something other than a `DagNodeVector`.
+  fn compare_arguments(&self, other: DagNodePtr) -> Ordering {
+    let other  = unsafe { &*other };
+    let symbol = self.symbol_ref();
+
+    assert!(symbol == other.symbol_ref(), "symbols differ");
+
+    if other.core().theory_tag != self.core().theory_tag {
+      // if let None = other.as_any().downcast_ref::<FreeDagNode>() {
+      // Not even the same theory. It's not clear what to return in this case, so just compare symbols.
+      return symbol.compare(other.symbol_ref());
+    };
+
+    if (true, true) == (self.core().args.is_null(), other.core().args.is_null()) {
+      return Ordering::Equal;
+    }
+    else if (false, false) == (self.core().args.is_null(), other.core().args.is_null()) {
+      if (false, false) == (self.core().needs_destruction(), other.core().needs_destruction()) {
+        // Singleton case
+        let self_child     : DagNodePtr = arg_to_dag_node(self.core().args);
+        let other_child_ptr: DagNodePtr = arg_to_dag_node(other.core().args);
+
+        // Fast bail on equal pointers.
+        if std::ptr::addr_eq(self_child, other_child_ptr) {
+          return Ordering::Equal; // Points to same node
+        }
+        let self_child = unsafe{ &*self_child };
+
+        return self_child.compare(other_child_ptr);
+      }
+      else if (true, true) == (self.core().needs_destruction(), other.core().needs_destruction()) {
+        // The vector case
+        let self_arg_vec : &DagNodeVector = arg_to_node_vec(self.core().args);
+        let other_arg_vec: &DagNodeVector = arg_to_node_vec(other.core().args);
+
+        // ToDo: This check isn't in Maude?
+        if self_arg_vec.len() != other_arg_vec.len() {
+          return if self_arg_vec.len() > other_arg_vec.len() {
+            Ordering::Greater
+          } else {
+            Ordering::Less
+          };
+        }
+
+        // Compare all children from left to right
+        // Maude structures this so that it's tail call optimized, but we don't have that guarantee.
+        for (&p, &q) in self_arg_vec.iter().zip(other_arg_vec.iter()) {
+          // Fast bail on equal pointers.
+          if std::ptr::addr_eq(p, q) {
+            continue; // Points to same node
+          }
+
+          let p_child: &dyn DagNode = unsafe { &*p };
+          let result = p_child.compare(q);
+
+          if result.is_ne() {
+            return result;
+          }
+        }
+      }
+    }
+    else {
+      // It's not clear what to do in this case, if the case can even happen.
+      if other.core().args.is_null() {
+        return Ordering::Greater;
+      } else {
+        return Ordering::Less;
+      }
+    }
+
+    // Survived all attempts at finding inequality.
+    Ordering::Equal
+  }
+
+  fn equals(&self, other: DagNodePtr) -> bool {
+    let other_ref = unsafe{ &*other };
+    std::ptr::addr_eq(self, other)
+      || (
+      self.symbol_ref() == other_ref.symbol_ref()
+          && self.compare_arguments(other) == Ordering::Equal
+      )
   }
 
   // endregion
 
   // region GC related methods
-  #[inline(always)]
-  pub fn is_marked(&self) -> bool {
-    self.flags.contains(DagNodeFlag::Marked)
-  }
 
-  #[inline(always)]
-  pub fn needs_destruction(&self) -> bool {
-    if let DagNodeArgument::Many(_) = self.args {
-      true
-    } else {
-      false
-    }
-  }
-
-  #[inline(always)]
-  pub fn simple_reuse(&self) -> bool {
-    !self.flags.contains(DagNodeFlag::Marked) && !self.needs_destruction()
-  }
-
-  #[inline(always)]
-  pub fn mark(&'static mut self) {
-    if self.flags.contains(DagNodeFlag::Marked) {
+  /// MUST override if `Self::args` is not a `DagNodeVector`.
+  fn mark(&'static mut self) {
+    if self.core().is_marked() {
       return;
     }
 
     increment_active_node_count();
-    self.flags.insert(DagNodeFlag::Marked);
+    self.core_mut().flags.insert(DagNodeFlag::Marked);
 
-    match &mut self.args {
+    // The empty case
+    if self.core().args.is_null() {
+      // pass
+    } // The vector case
+    else if self.core().needs_destruction() {
+      {
+        let node_vector: DagNodeVectorRefMut = arg_to_node_vec(self.core().args);
 
-      DagNodeArgument::None => { /* pass */ }
-
-      DagNodeArgument::Single(node) => {
-        if let Some(node) = unsafe { node.as_mut() } {
+        for node_ptr in node_vector.iter_mut() {
+          assert!(!node_ptr.is_null());
+          let node: &mut dyn DagNode = unsafe { node_ptr.as_mut_unchecked() };
           node.mark();
         }
       }
+      // Reallocate
+      let node_vector: DagNodeVectorRefMut = arg_to_node_vec(self.core().args);
+      self.core_mut().args = (node_vector.copy() as *mut DagNodeVector) as *mut u8;
 
-      DagNodeArgument::Many(ref mut node_vec) => {
-
-
-        for node in node_vec.iter() {
-          if let Some(node) = unsafe { node.as_mut() } {
-            node.mark();
-          } else {
-            eprintln!("Bad node found.")
-          }
-        }
-
-        // Sanity check
-        // ToDo: This will need to change for variadic nodes.
-        let arity = if let Arity::Value(v) = unsafe{ (&*self.symbol).arity } { v } else { 0 };
-        if node_vec.capacity() != arity as usize || node_vec.len() > node_vec.capacity() {
-          panic!("Node vector capacity mismatch.")
-        }
-
-        // Reallocate
-        *node_vec = node_vec.shallow_copy();
-      }
-
+    } // The singleton case
+    else {
+      // Guaranteed to be non-null.
+      let node: &mut dyn DagNode = unsafe{ arg_to_dag_node(self.core().args).as_mut_unchecked() };
+      node.mark();
     }
+  } // end fn mark
 
-  }
-  //endregion
-
+  // endregion GC related methods
 }
 
-impl Display for DagNode {
-  fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-    write!(f, "node<{}>", self.symbol())
+impl Formattable for &dyn DagNode {
+  fn repr(&self, _style: FormatStyle) -> String {
+    if self.symbol().is_null() {
+      "null".to_string()
+    }
+    else {
+      format!("<{}>", self.symbol_ref())
+    }
   }
+}
+
+impl Display for dyn DagNode {
+  fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    write!(f, "{}", self.repr(FormatStyle::default()))
+  }
+}
+
+
+// Unsafe private free functions
+
+/// Reinterprets `args` as a `DagNodePtr`. The caller MUST be sure
+/// that `args` actually points to a `DagNode`.
+#[inline(always)]
+pub fn arg_to_dag_node(args: *mut u8) -> DagNodePtr {
+  DagNodeCore::upgrade(args as ThinDagNodePtr)
+}
+
+/// Reinterprets `args` as a `DagNodeVectorRefMut`. The caller MUST
+/// be sure that `args` actually points to a `DagNodeVector`.
+#[inline(always)]
+pub fn arg_to_node_vec(args: *mut u8) -> DagNodeVectorRefMut {
+  unsafe { (args as *mut DagNodeVector).as_mut_unchecked() }
 }

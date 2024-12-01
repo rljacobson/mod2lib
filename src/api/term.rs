@@ -1,271 +1,203 @@
 /*!
 
-A `Term` is a node in the expression tree. That is, an expression tree is a term, and
-each subexpression is a term. The algorithms do not operate on expression trees (terms).
-Instead, the algorithms operate on a directed acyclic graph (DAG) is constructed from the
-tree. Thus, for each `Term` type, there is a corresponding `DagNode` type. However, because
-of structural sharing, the node instances themselves are not in 1-to-1 correspondence.
+Every theory's term type must implement the `Term` trait. The concrete term type should
+have a `TermCore` member that can be accessed through the trait method `Term::core()`
+and `Term::core_mut()`. This allows a lot of shared implementation in `TermCore`.
 
 */
 
 use std::{
+  any::Any,
+  fmt::{Display, Formatter},
+  hash::{Hash, Hasher},
+  cmp::Ordering,
   collections::{
     HashMap,
     hash_map::Entry
   },
-  cmp::Ordering,
-  ptr::NonNull,
-  sync::{
-    atomic::{
-      Ordering::Relaxed,
-      AtomicBool
-    },
-    Mutex
-  },
+  sync::atomic::Ordering::Relaxed
 };
-use std::cell::Cell;
-use enumflags2::{bitflags, BitFlags};
-use once_cell::sync::Lazy;
 
 use crate::{
-  abstractions::{NatSet, RcCell, Set},
-  api::{
-    Substitution,
-    SymbolSet,
-    UNDEFINED,
-    dag_node::{DagNode, DagNodeFlag, DagNodePtr},
-    free_theory::FreeTerm,
-    symbol::{Symbol, SymbolPtr}
+  abstractions::{
+    NatSet,
+    RcCell
   },
-  core::sort::{Sort, SortPtr}
+  api::{
+    dag_node::{DagNodePtr, DagNode},
+    UNDEFINED,
+    symbol::{
+      Symbol,
+      SymbolPtr,
+      SymbolSet
+    }
+  },
+  core::{
+    dag_node_core::{
+      DagNodeCore,
+      DagNodeFlag,
+    },
+    format::{
+      FormatStyle,
+      Formattable
+    },
+    term_core::{
+      cache_node_for_term,
+      clear_cache_and_set_sort_info,
+      lookup_node_for_term,
+      TermAttribute,
+      TermCore
+    },
+    substitution::Substitution
+  }
 };
 
-pub type BxTerm    = Box<Term>;
-pub type RcTerm    = RcCell<Term>;
-pub type MaybeTerm = Option<BxTerm>;
-pub type TermSet   = HashMap<u32, usize>;
+pub type BxTerm  = Box<dyn Term>;
+pub type MaybeTerm   = Option<&'static dyn Term>;
+pub type RcTerm  = RcCell<dyn Term>;
+pub type TermSet = HashMap<u32, usize>;
 
-/*
-  static Vector<DagNode*> subDags;
-  static TermSet converted;
-  static bool setSortInfoFlag;
-*/
-static mut CONVERTED_TERMS: Lazy<TermSet> =  Lazy::new(|| {
-  TermSet::new()
-});
-
-static mut SUBDAG_CACHE : Lazy<Vec<DagNodePtr>> = Lazy::new(|| {
-  Vec::new()
-});
-
-static SET_SORT_INFO_FLAG: AtomicBool = AtomicBool::new(false);
-
-/// This trait holds the theory-specific parts of a term.
-pub trait TheoryTerm {
-  fn dagify(&self, parent: &Term) -> DagNodePtr;
-}
-
-
-
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
-pub enum TermKind {
-  Free,
-  Bound,
-  Ground,
-  NonGround,
-}
-
-#[bitflags]
-#[repr(u8)]
-#[derive(Copy, Clone, Eq, PartialEq)]
-pub enum TermAttribute {
-  ///	A subterm is stable if its top symbol cannot change under instantiation.
-  Stable,
-
-  ///	A subterm is in an eager context if the path to its root contains only
-  ///	eagerly evaluated positions.
-  EagerContext,
-
-  ///	A subterm "honors ground out match" if its matching algorithm guarantees
-  ///	never to return a matching subproblem when all the terms variables
-  ///	are already bound.
-  HonorsGroundOutMatch,
-}
-
-pub type TermAttributes = BitFlags<TermAttribute, u8>;
-
-pub struct Term {
-  /// The top symbol of the term
-  pub(crate) symbol: SymbolPtr,
-  pub(crate) sort  : Option<NonNull<SortPtr>>,
-  theory_term      : Box<dyn TheoryTerm>,
-  /// The handles (indices) for the variable terms that occur in this term or its descendants
-  pub(crate) occurs_set      : NatSet,
-  pub(crate) context_set     : NatSet,
-  pub(crate) collapse_symbols: SymbolSet,
-  pub(crate) attributes      : TermAttributes,
-  pub(crate) term_kind       : TermKind,
-  pub(crate) save_index      : i32,            // NoneIndex = -1
-  hash_value                 : u32,
-
-  /// The number of nodes in the term tree
-  pub(crate) cached_size:  Cell<i32>,
-}
-
-impl Term {
-  pub fn new(symbol: SymbolPtr) -> Term {
-    Term {
-      symbol,
-      sort            : None,
-      theory_term     : Box::new(FreeTerm::new()),
-      occurs_set      : Default::default(),
-      context_set     : Default::default(),
-      collapse_symbols: Default::default(),
-      attributes      : TermAttributes::default(),
-      term_kind       : TermKind::Free,
-      save_index      : 0,
-      hash_value      : 0,
-      cached_size     : Cell::new(UNDEFINED),
-    }
-  }
-
+pub trait Term: Formattable {
+  fn as_any(&self) -> &dyn Any;
+  fn as_any_mut(&mut self) -> &mut dyn Any;
+  fn as_ptr(&self) -> *const dyn Term;
+  fn semantic_hash(&self) -> u32;
   /// Normalizes the term, returning the computed hash and `true` if the normalization changed
   /// the term or `false` otherwise.
-  pub fn normalize(&mut self, _full: bool) -> (u32, bool){
-    unimplemented!()
-  }
+  fn normalize(&mut self, full: bool) -> (u32, bool);
+
+
+
+  fn core(&self) -> &TermCore;
+  fn core_mut(&mut self) -> &mut TermCore;
+
+  /// This method should construct a new `Term` of the concrete implementing type,
+  /// including its `TermCore` member, and return it wrapped in an `Rc`.
+  // fn new(symbol: SymbolPtr) -> BxTerm;
 
   // region Accessors
 
   /// Is the term stable?
   #[inline(always)]
-  pub fn is_stable(&self) -> bool {
-    self.attributes.contains(TermAttribute::Stable)
+  fn is_stable(&self) -> bool {
+    self.core().is_stable()
   }
 
   /// A subterm "honors ground out match" if its matching algorithm guarantees never to return a matching subproblem
   /// when all the terms variables are already bound.
   #[inline(always)]
-  pub fn honors_ground_out_match(&self) -> bool {
-    self.attributes.contains(TermAttribute::HonorsGroundOutMatch)
+  fn honors_ground_out_match(&self) -> bool {
+    self.core().honors_ground_out_match()
   }
 
   #[inline(always)]
-  pub fn set_honors_ground_out_match(&mut self, value: bool) {
-    if value {
-      self.attributes.insert(TermAttribute::HonorsGroundOutMatch);
-    } else {
-      self.attributes.remove(TermAttribute::HonorsGroundOutMatch);
-    }
+  fn set_honors_ground_out_match(&mut self, value: bool) {
+    self.core_mut().set_honors_ground_out_match(value)
   }
 
   #[inline(always)]
-  pub fn is_eager_context(&self) -> bool {
-    self.attributes.contains(TermAttribute::EagerContext)
+  fn is_eager_context(&self) -> bool {
+    self.core().is_eager_context()
   }
 
   #[inline(always)]
-  pub fn is_variable(&self) -> bool {
-    unsafe {
-      let symbol: &Symbol = &*self.symbol;
-      symbol.is_variable()
-    }
+  fn is_variable(&self) -> bool {
+    self.core().is_variable()
   }
 
   #[inline(always)]
-  pub fn ground(&self) -> bool {
-    self.occurs_set.is_empty()
+  fn ground(&self) -> bool {
+    self.core().ground()
   }
 
   /// The handles (indices) for the variable terms that occur in this term or its descendants
   #[inline(always)]
   fn occurs_below(&self) -> &NatSet {
-    &self.occurs_set
+    self.core().occurs_below()
   }
 
   #[inline(always)]
   fn occurs_below_mut(&mut self) -> &mut NatSet {
-    &mut self.occurs_set
+    self.core_mut().occurs_below_mut()
   }
 
   #[inline(always)]
   fn occurs_in_context(&self) -> &NatSet {
-    &self.context_set
+    self.core().occurs_in_context()
   }
 
   #[inline(always)]
   fn occurs_in_context_mut(&mut self) -> &mut NatSet {
-    &mut self.context_set
+    self.core_mut().occurs_in_context_mut()
   }
 
   #[inline(always)]
   fn collapse_symbols(&self) -> &SymbolSet {
-    &self.collapse_symbols
+    self.core().collapse_symbols()
   }
 
   /// Returns an iterator over the arguments of the term
-  fn iter_args(&self) -> Box<dyn Iterator<Item = &Term> + '_>{
-    // Box::new(std::iter::empty::<RcTerm>())
-    unimplemented!("Implement empty iterator as Box::new(std::iter::empty::<RcTerm>())")
+  fn iter_args(&self) -> Box<dyn Iterator<Item = &dyn Term> + '_>;
+  // Implement an empty iterator with:
+  //    Box::new(std::iter::empty::<&dyn Term>())
+
+  #[inline(always)]
+  fn symbol_ref(&self) -> &'static Symbol {
+    self.core().symbol_ref()
+  }
+
+  #[inline(always)]
+  fn symbol(&self) -> SymbolPtr {
+    self.core().symbol
   }
 
   /// Compute the number of nodes in the term tree
   fn compute_size(&self) -> i32 {
-    if self.cached_size.get() != UNDEFINED {
-      self.cached_size.get()
-    } else {
+    let cached_size = &self.core().cached_size;
+
+    if cached_size.get() != UNDEFINED {
+      cached_size.get()
+    }
+    else {
       let mut size = 1; // Count self.
       for arg in self.iter_args() {
         size += arg.compute_size();
       }
-      self.cached_size.set(size);
-      size
-    }
-  }
 
-  #[inline(always)]
-  pub fn symbol(&self) -> &'static Symbol {
-    unsafe {
-      &*self.symbol
+      cached_size.set(size);
+      size
     }
   }
 
   // endregion Accessors
 
+
   // region Comparison Functions
 
-  /// Delegates to TheoryTerm::compare_term_arguments
-  fn compare_term_arguments(&self, _other: &Term) -> Ordering{
-    unimplemented!()
-  }
+  fn compare_term_arguments(&self, _other: &dyn Term) -> Ordering;
+  fn compare_dag_arguments(&self, _other: &dyn DagNode) -> Ordering;
 
   #[inline(always)]
-  fn compare_dag_node(&self, other: &DagNode) -> Ordering {
-    if self.symbol().hash_value == other.symbol().hash_value {
+  fn compare_dag_node(&self, other: &dyn DagNode) -> Ordering {
+    if self.symbol_ref().hash_value == other.symbol_ref().hash_value {
       self.compare_dag_arguments(other)
     } else {
-      self.symbol().compare(other.symbol())
+      self.symbol_ref().compare(other.symbol_ref())
     }
   }
 
-  /// Delegates to TheoryTerm
-  fn compare_dag_arguments(&self, _other: &DagNode) -> Ordering{
-    unimplemented!()
-  }
-
-
-  fn partial_compare(&self, partial_substitution: &mut Substitution, other: &DagNode) -> Option<Ordering> {
+  fn partial_compare(&self, partial_substitution: &mut Substitution, other: &dyn DagNode) -> Option<Ordering> {
     if !self.is_stable() {
       // Only used for `VariableTerm`
       return self.partial_compare_unstable(partial_substitution, other);
     }
 
-    if self.symbol == other.symbol {
+    if std::ptr::addr_eq(self.symbol(), other.symbol()) {
       // Only used for `FreeTerm`
       return self.partial_compare_arguments(partial_substitution, other);
     }
 
-    if self.symbol().compare(other.symbol()) == Ordering::Less {
+    if self.symbol_ref().compare(other.symbol_ref()) == Ordering::Less {
       Some(Ordering::Less)
     } else {
       Some(Ordering::Greater)
@@ -273,8 +205,8 @@ impl Term {
   }
 
   #[inline(always)]
-  fn compare(&self, other: &Term) -> Ordering {
-    let r = self.symbol().compare(other.symbol());
+  fn compare(&self, other: &dyn Term) -> Ordering {
+    let r = self.symbol_ref().compare(other.symbol_ref());
     if r == Ordering::Equal {
       return self.compare_term_arguments(other);
     }
@@ -282,12 +214,12 @@ impl Term {
   }
 
   /// Overridden in `VariableTerm`
-  fn partial_compare_unstable(&self, _partial_substitution: &mut Substitution, _other: &DagNode) -> Option<Ordering> {
+  fn partial_compare_unstable(&self, _partial_substitution: &mut Substitution, _other: &dyn DagNode) -> Option<Ordering> {
     None
   }
 
   /// Overridden in `FreeTerm`
-  fn partial_compare_arguments(&self, _partial_substitution: &mut Substitution, _other: &DagNode) -> Option<Ordering> {
+  fn partial_compare_arguments(&self, _partial_substitution: &mut Substitution, _other: &dyn DagNode) -> Option<Ordering> {
     None
   }
 
@@ -298,9 +230,7 @@ impl Term {
 
   #[inline(always)]
   fn term_to_dag(&self, set_sort_info: bool) -> DagNodePtr {
-    SET_SORT_INFO_FLAG.store(set_sort_info, Relaxed);
-    unsafe { SUBDAG_CACHE.clear(); }
-    unsafe { CONVERTED_TERMS.clear(); }
+    clear_cache_and_set_sort_info(set_sort_info);
     self.dagify()
   }
 
@@ -308,37 +238,47 @@ impl Term {
   /// sharing. Each implementing type will supply its own implementation of `dagify_aux(…)`, which recursively
   /// calls `dagify(…)` on its children and then converts itself to a type implementing DagNode, returning `DagNodePtr`.
   fn dagify(&self) -> DagNodePtr {
-    if let Entry::Occupied(occupied_entry) = unsafe{ CONVERTED_TERMS.entry(self.semantic_hash()) } {
-      let idx = *occupied_entry.get();
-      return unsafe{ SUBDAG_CACHE[idx] };
+    let semantic_hash = self.semantic_hash();
+    if let Some(dag_node) = lookup_node_for_term(semantic_hash) {
+      return dag_node;
     }
 
-    let mut d = self.dagify_aux();
-    if SET_SORT_INFO_FLAG.load(Relaxed) {
-      assert_ne!(
-        self.sort,
-        None,
-        "Missing sort info"
-      );
-      let mut d_mut: &mut DagNode = unsafe{ &mut *d };
-      d_mut.sort = self.sort;
-      d_mut.flags.insert(DagNodeFlag::Reduced.into());
-    }
+    let dag_node = self.dagify_aux();
+    cache_node_for_term(semantic_hash, dag_node);
 
-    let idx = unsafe{ SUBDAG_CACHE.len() };
-    unsafe{ SUBDAG_CACHE.push(d) };
-    // sub_dags.insert(self_hash, d.clone());
-    unsafe{ CONVERTED_TERMS.insert(self.semantic_hash(), idx) };
-    d
+    dag_node
   }
 
   /// Create a directed acyclic graph from this term. This method has the implementation-specific stuff.
-  fn dagify_aux(&self) -> DagNodePtr{
-    self.theory_term.dagify(self)
-  }
+  fn dagify_aux(&self) -> DagNodePtr;
 
   // endregion
 
 }
 
 
+// region trait impls for Term
+
+// ToDo: Revisit whether `semantic_hash` is appropriate for the `Hash` trait.
+// Use the `Term::compute_hash(…)` hash for `HashSet`s and friends.
+impl Hash for dyn Term {
+  fn hash<H: Hasher>(&self, state: &mut H) {
+    state.write_u32(self.semantic_hash())
+  }
+}
+
+impl PartialEq for dyn Term {
+  fn eq(&self, other: &Self) -> bool {
+    self.semantic_hash() == other.semantic_hash()
+  }
+}
+
+impl Eq for dyn Term {}
+// endregion
+
+
+impl Display for dyn Term {
+  fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    write!(f, "[{}]", self.symbol_ref())
+  }
+}

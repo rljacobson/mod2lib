@@ -9,7 +9,7 @@ The allocator for garbage collected memory. This is really two different allocat
 #![allow(unused_imports)]
 mod arena;
 mod bucket;
-pub(crate) mod node_vector;
+pub(crate) mod gc_vector;
 mod node_allocator;
 mod storage_allocator;
 

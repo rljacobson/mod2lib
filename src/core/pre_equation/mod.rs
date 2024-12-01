@@ -8,14 +8,13 @@ implemented.) The subclass is implemented as enum `PreEquationKind`.
 pub mod condition;
 
 use std::fmt::{Display, Formatter};
-use std::ops::Deref;
+
 use enumflags2::{bitflags, BitFlags};
 
 use crate::{
   abstractions::IString,
   core::{
     pre_equation::condition::Conditions,
-    sort::sort::SortPtr
   },
   api::term::BxTerm,
 };
@@ -84,16 +83,16 @@ impl Display for PreEquation {
     match &self.kind {
 
       PreEquationKind::Equation { rhs_term } => {
-        write!(f, "equation {} = {}", self.lhs_term.borrow(),  rhs_term)?;
+        write!(f, "equation {} = {}", self.lhs_term,  rhs_term)?;
       }
 
       PreEquationKind::Rule { rhs_term } => {
-        write!(f, "rule {} => {}", self.lhs_term.borrow(),  rhs_term)?;
+        write!(f, "rule {} => {}", self.lhs_term,  rhs_term)?;
 
       }
 
       PreEquationKind::Membership { sort_spec } => {
-        write!(f, "membership {} :: {}", self.lhs_term.borrow(),  sort_spec)?;
+        write!(f, "membership {} :: {}", self.lhs_term,  sort_spec)?;
 
       }
 

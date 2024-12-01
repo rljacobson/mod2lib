@@ -81,7 +81,9 @@ macro_rules! heap_destroy {
 
         // Convert the raw pointer back into a Box, taking ownership back
         // and enabling Rust's automatic memory management
-        unsafe { Box::from_raw($ptr); }
+        unsafe {
+            let _ = Box::from_raw($ptr);
+        }
         // The Box is dropped here, and the memory is deallocated
     }};
 }

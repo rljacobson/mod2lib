@@ -15,10 +15,14 @@ use std::fmt::Display;
 use enumflags2::{bitflags, make_bitflags, BitFlags};
 
 use crate::{
-  abstractions::IString,
-  api::Arity
+  abstractions::{
+    int_to_subscript,
+    Set,
+    IString
+  },
+  api::Arity,
+  core::format::{FormatStyle, Formattable}
 };
-use crate::abstractions::Set;
 
 pub type SymbolPtr = *mut Symbol;
 pub type SymbolSet = Set<Symbol>;
@@ -41,14 +45,24 @@ pub struct Symbol {
 
 impl Symbol {
   pub fn new(name: IString, arity: Arity) -> Symbol {
-    let mut symbol = Symbol{
+    // Compute hash
+    static mut SYMBOL_COUNT: u32 = 0;
+    unsafe{ SYMBOL_COUNT += 1; }
+    let numeric_arity: u32 = if let Arity::Value(v) = arity {
+      v as u32
+    } else {
+      0
+    };
+    let hash_value = unsafe{ SYMBOL_COUNT } | (numeric_arity << 24); // Maude: self.arity << 24
+
+    let symbol = Symbol{
       name,
       arity,
-      attributes: SymbolAttributes::default(),
+      attributes : SymbolAttributes::default(),
       symbol_type: SymbolType::default(),
-      hash_value: 0,
+      hash_value
     };
-    symbol.compute_hash();
+
     symbol
   }
 
@@ -58,25 +72,6 @@ impl Symbol {
     self.symbol_type == SymbolType::Variable
   }
 
-  fn compute_hash(&mut self) -> u32 {
-    // In Maude, the hash value is the number (chronological order of creation) of the symbol OR'ed
-    // with (arity << 24). Here we swap the "number" with the hash of the IString as defined by the
-    // IString implementation.
-
-    let arity: u32 = if let Arity::Value(v) = self.arity {
-      v as u32
-    } else {
-      0
-    };
-
-    // ToDo: This… isn't great, because the hash is 32 bits, not 24, and isn't generated in numeric
-    //       order. However, it still produces a total order on symbols in which symbols are ordered first
-    //       by arity and then arbitrarily (by hash). Ordering by insertion order is just as arbitrary, so
-    //       it should be ok.
-    let hash = (IString::get_hash(&self.name) & 0x00FFFFFF) | (arity << 24); // Maude: self.arity << 24
-    self.hash_value = hash;
-    hash
-  }
 
   /// Comparison based only on name and arity
   pub fn compare(&self, other: &Symbol) -> std::cmp::Ordering {
@@ -86,12 +81,19 @@ impl Symbol {
 
 impl Display for Symbol {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    // match self.arity {
-    //   Arity::Variadic => write!(f, "{}ᵥ", self.name),
-    //   Arity::Value(arity) if arity > 0 => write!(f, "{}/{}", self.name, arity)
-    //   _ => write!(f, "{}", self.name),
-    // }
-    write!(f, "{}", self.name)
+    match self.arity {
+      Arity::Variadic => write!(f, "{}ᵥ", self.name),
+      Arity::Value(arity) => write!(f, "{}{}", self.name, int_to_subscript(arity as u32)),
+      _ => write!(f, "{}", self.name),
+    }
+    // write!(f, "{}", self.name)
+  }
+}
+
+impl Formattable for Symbol {
+  fn repr(&self, _style: FormatStyle) -> String {
+    // ToDo: Probably defer to `Display` here.
+    self.name.to_string()
   }
 }
 

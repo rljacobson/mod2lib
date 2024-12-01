@@ -68,7 +68,6 @@ use crate::{
   }
 };
 use crate::abstractions::join_iter;
-use crate::core::sort::Sort;
 
 // Convenience types
 /// Each `Sort` holds a `KindPtr` to its `Kind`. However, it isn't clear if the `KindPtr` is ever dereferenced,
@@ -90,7 +89,7 @@ pub struct Kind {
 
 impl Kind {
   /// Returns a boxed Kind.
-  pub unsafe fn new(mut initial_sort: SortPtr) -> Result<BxKind, KindError> {
+  pub unsafe fn new(initial_sort: SortPtr) -> Result<BxKind, KindError> {
 
     let mut kind: BxKind = Box::new(
       Kind {
@@ -195,10 +194,9 @@ impl Kind {
       if supersort_count == 0 {
         (*sort).index_within_kind = self.append_sort(sort);
       } else {
-        (*sort).unresolved_supersort_count = supersort_count;
+        (*sort).index_within_kind = supersort_count as u8;
         // ToDo: I think sort.supersorts is not mutated, so this should be an iterator.
-        for i in 0..supersort_count {
-          let s = (*sort).supersorts[i];
+        for &s in (*sort).supersorts.iter() {
           if (*s).kind.is_null() {
             self.register_connected_sorts(s, visited_sort_count);
           }
@@ -213,8 +211,8 @@ impl Kind {
     for subsort in (*sort).subsorts.iter() {
       assert!(!subsort.is_null(), "discovered a null subsort pointer");
       // We "resolve" `self` as a supersort for each of `self`'s subsorts. If `self` is the last unresolved supersort for the subsort, it is finally time to add the subsort to its kind. This ensures all supersorts of that subsort have been "resolved" before the subsort is added.
-      (**subsort).unresolved_supersort_count -= 1;
-      if (**subsort).unresolved_supersort_count == 0 {
+      (**subsort).index_within_kind -= 1;
+      if (**subsort).index_within_kind == 0 {
         // All supersorts resolved, so add to kind. There is a symmetric statement for subsorts in `Kind::register_connected_sorts`
         (**subsort).index_within_kind = self.append_sort(*subsort);
       }
@@ -222,9 +220,9 @@ impl Kind {
   }
 
   /// Pushes the sort onto `self.sorts`, returning the index of the sort in `self.sorts`.
-  pub fn append_sort(&mut self, sort: SortPtr) -> usize {
+  pub fn append_sort(&mut self, sort: SortPtr) -> u8 {
     self.sorts.push(sort);
-    self.sorts.len() - 1
+    (self.sorts.len() - 1) as u8
   }
 
 }

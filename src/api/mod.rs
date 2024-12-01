@@ -12,14 +12,9 @@ pub(crate) mod term;
 pub(crate) mod dag_node;
 pub mod free_theory;
 
-// Unimplemented Types
-#[derive(Default)]
-pub struct SymbolSet;
-pub struct Substitution;
-
 // Special Values
 // ToDo: Do UNDEFINED the right way. Is this great? No. But it's convenient.
-const UNDEFINED: i32 = -1;
+pub(crate) const UNDEFINED: i32 = -1;
 const NONE:      i32 = -1;
 const ROOT_OK:   i32 = -2;
 
@@ -31,9 +26,10 @@ pub enum Arity {
   Unspecified,
 
   Variadic,
-  Value(i16)
+  Value(u16)
 }
 
+/*
 impl From<Arity> for i16 {
   fn from(arity: Arity) -> Self {
     match arity {
@@ -63,3 +59,4 @@ impl From<i16> for Arity {
     }
   }
 }
+*/

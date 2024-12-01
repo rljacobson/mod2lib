@@ -24,8 +24,8 @@ impl NatSet {
   }
 
   #[inline(always)]
-  pub fn contains(&self, value: usize) -> bool {
-    self.0.contains(value)
+  pub fn contains(&self, value: u8) -> bool {
+    self.0.contains(value as usize)
   }
 
   /// Returns the difference with the other specified bit vector.

@@ -34,7 +34,7 @@ use crate::{
     },
     variable::Variable
   },
-  abstractions::erased::DynHash
+  abstractions::DynHash
 };
 
 
@@ -151,9 +151,13 @@ When called, the macro expands into the following:
 ## Example Usage
 
 ```rust
-use mod2lib::api::atom::implement_data_atom;
-use mod2lib::api::symbol::Symbol;
+use std::any::Any;
+use once_cell::sync::Lazy;
 use paste::paste;
+use mod2lib::api::atom::{implement_data_atom, Atom, DataAtom};
+use mod2lib::api::symbol::{Symbol, SymbolPtr, SymbolType, SymbolAttribute};
+use mod2lib::IString;
+use mod2lib::api::Arity;
 
 implement_data_atom!(Integer, isize);
 
@@ -206,12 +210,9 @@ macro_rules! implement_data_atom {
         }
       }
 
-      // fn hash(&self, state: &mut dyn Hasher) {
-      //   self.0.hash(state)
-      // }
-
       fn symbol(&self) -> SymbolPtr {
-        &*[<$name:snake:upper _SYMBOL>]
+        let ptr: *const Symbol = unsafe{&*[<$name:snake:upper _SYMBOL>]};
+        ptr as SymbolPtr
       }
     }
 
@@ -223,6 +224,7 @@ macro_rules! implement_data_atom {
           arity:       Arity::Unspecified,
           attributes:  SymbolAttribute::Constructor.into(),
           symbol_type: SymbolType::Data,
+          hash_value:  0
         }
     });
 

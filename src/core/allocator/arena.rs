@@ -10,7 +10,7 @@ use std::{
 };
 
 use crate::{
-  api::dag_node::DagNode,
+  core::dag_node_core::DagNodeCore,
   core::{
     allocator::node_allocator::ARENA_SIZE,
   }
@@ -19,7 +19,7 @@ use crate::{
 #[repr(align(8))]
 pub struct Arena {
   pub(crate) next_arena: *mut Arena,
-  data: [DagNode; ARENA_SIZE],
+  data: [DagNodeCore; ARENA_SIZE],
 }
 
 impl Arena {
@@ -27,7 +27,7 @@ impl Arena {
   pub fn allocate_new_arena() -> *mut Arena {
 
     // Create an uninitialized array
-    let data: [MaybeUninit<DagNode>; ARENA_SIZE] = unsafe { MaybeUninit::uninit().assume_init() };
+    let data: [MaybeUninit<DagNodeCore>; ARENA_SIZE] = unsafe { MaybeUninit::uninit().assume_init() };
 
     /* Each node is initialized on allocation, so we don't bother with this.
     // Initialize each element
@@ -40,14 +40,14 @@ impl Arena {
 
     let arena = Box::new(Arena{
       next_arena: null_mut(),
-      data      : unsafe { std::mem::transmute::<_, [DagNode; ARENA_SIZE]>(data) }
+      data      : unsafe { std::mem::transmute::<_, [DagNodeCore; ARENA_SIZE]>(data) }
     });
 
     Box::into_raw(arena)
   }
 
   #[inline(always)]
-  pub fn first_node(&mut self) -> *mut DagNode {
+  pub fn first_node(&mut self) -> *mut DagNodeCore {
     &mut self.data[0]
   }
 }

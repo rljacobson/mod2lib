@@ -149,13 +149,13 @@ mod tests {
     let v0 = 0u64;
     let v1 = 1u64 + 2u64 + 3u64 + 4u64;
     let v2 = 0u64
-      .shl(7u32)
+      .shl(7i32)
       .wrapping_add(1u64)
-      .shl(7u32)
+      .shl(7i32)
       .wrapping_add(2u64)
-      .shl(7u32)
+      .shl(7i32)
       .wrapping_add(3u64)
-      .shl(7u32)
+      .shl(7i32)
       .wrapping_add(4u64);
     let hash_result = hash3(v0, v1, v2);
     assert_eq!(hasher.finish(), hash_result);

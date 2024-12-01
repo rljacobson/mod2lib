@@ -43,7 +43,7 @@ publish     = false
 
 [features]
 gc_debug = []
-default = []
+default = ["gc_debug"]
 
 [dependencies]
 

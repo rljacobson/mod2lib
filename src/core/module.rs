@@ -27,21 +27,16 @@ use crate::{
     IString,
     join_iter
   },
-  api::symbol::{
-    Symbol,
-    SymbolPtr
-  },
+  api::symbol::SymbolPtr,
   core::{
     pre_equation::PreEquation,
     sort::{
       kind::{
         BxKind,
-        KindPtr,
         Kind
       },
       collection::SortCollection,
-      kind_error::KindError,
-      Sort
+      kind_error::KindError
     }
   },
   heap_destroy,
@@ -109,7 +104,7 @@ impl Module {
             .filter(|(_, sort_ptr)| (**sort_ptr).kind.is_null())
     {
       let kind = unsafe { Kind::new(sort) };
-      let mut kind = kind.unwrap_or_else(
+      let kind = kind.unwrap_or_else(
         | kind_error | {
           let msg = kind_error.to_string();
           match kind_error {
@@ -181,9 +176,7 @@ impl Module {
 impl Drop for Module {
   fn drop(&mut self) {
     for (_, &symbol_ptr) in self.symbols.iter() {
-      unsafe {
-        heap_destroy!(symbol_ptr);
-      }
+      heap_destroy!(symbol_ptr);
     }
   }
 }

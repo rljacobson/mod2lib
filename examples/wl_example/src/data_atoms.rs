@@ -14,6 +14,7 @@ use std::{
   any::Any,
   fmt::Display
 };
+use std::ops::Deref;
 use once_cell::sync::Lazy;
 use total_float_wrap::TotalF64;
 use paste::paste;
@@ -71,17 +72,19 @@ impl DataAtom for FloatAtom {
   }
 
   fn symbol(&self) -> SymbolPtr {
-    &*Float_SYMBOL
+    let ptr: *const Symbol = unsafe{ &*FLOAT_SYMBOL };
+    ptr as SymbolPtr
   }
 }
 
 #[allow(non_upper_case_globals)]
-pub static Float_SYMBOL: Lazy<Symbol> = Lazy::new(|| {
+pub static FLOAT_SYMBOL: Lazy<Symbol> = Lazy::new(|| {
   Symbol{
     name:        IString::from("Float"),  // The convention is `Name` is the symbol for `NameAtom`.
     arity:       Arity::Unspecified,                  // Data is generally "nullary", but we can leave it unspecified.
     attributes:  SymbolAttribute::Constructor.into(), // All `DataAtom`s have `SymbolAttribute::Constructor`.
     symbol_type: SymbolType::Data,                    // All `DataAtom`s have `symbol_type` `SymbolType::Data`.
+    hash_value:  0,
   }
 });
 

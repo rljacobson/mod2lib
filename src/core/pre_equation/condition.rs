@@ -46,19 +46,19 @@ impl Display for Condition {
     match self {
 
       Condition::Equality { lhs_term, rhs_term } => {
-        write!(f, "{} = {}", lhs_term, rhs_term)
+        write!(f, "{} = {}", *lhs_term, *rhs_term)
       }
 
       Condition::SortMembership { lhs_term, sort } => {
-        write!(f, "{} :: {}", lhs_term, sort)
+        write!(f, "{} :: {}", *lhs_term, *sort)
       }
 
       Condition::Match { lhs_term, rhs_term } => {
-        write!(f, "{} := {}", lhs_term, rhs_term)
+        write!(f, "{} := {}", *lhs_term, *rhs_term)
       }
 
       Condition::Rewrite { lhs_term, rhs_term } => {
-        write!(f, "{} => {}", lhs_term, rhs_term)
+        write!(f, "{} => {}", *lhs_term, *rhs_term)
       }
 
     }

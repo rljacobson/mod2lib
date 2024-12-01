@@ -26,9 +26,9 @@ use std::{
 use once_cell::sync::Lazy;
 
 use crate::{
-  api::dag_node::{
-    DagNodePtr,
-    DagNode,
+  core::dag_node_core::{
+    ThinDagNodePtr,
+    DagNodeCore,
     DagNodeFlag,
     DagNodeFlags,
   },
@@ -39,6 +39,10 @@ use crate::{
     },
     root_container::mark_roots,
   },
+  log::{
+    debug,
+    info
+  }
 };
 
 // Constant Allocator Parameters
@@ -74,7 +78,7 @@ pub fn want_to_collect_garbage() -> bool {
 }
 
 #[inline(always)]
-pub fn allocate_dag_node() -> DagNodePtr {
+pub fn allocate_dag_node() -> ThinDagNodePtr {
   acquire_node_allocator("want_to_collect_garbage").allocate_dag_node()
 }
 
@@ -91,10 +95,10 @@ pub(crate) struct NodeAllocator {
   first_arena                    : *mut Arena,
   last_arena                     : *mut Arena,
   current_arena                  : *mut Arena,
-  next_node                      : *mut DagNode,
-  end_pointer                    : *mut DagNode,
+  next_node                      : *mut DagNodeCore,
+  end_pointer                    : *mut DagNodeCore,
   last_active_arena              : *mut Arena,
-  last_active_node               : *mut DagNode,
+  last_active_node               : *mut DagNodeCore,
 }
 
 // Access is hidden behind a mutex.
@@ -139,7 +143,7 @@ impl NodeAllocator {
   }
 
   /// Allocates a new `DagNode`
-  pub fn allocate_dag_node(&mut self) -> *mut DagNode {
+  pub fn allocate_dag_node(&mut self) -> *mut DagNodeCore {
     // ToDo: I think we can replace these pointers with indices into the current arena's data array.
     //       Includes next_node, end_pointer, end_node.
     let mut current_node = self.next_node;
@@ -182,7 +186,7 @@ impl NodeAllocator {
   unsafe fn allocate_new_arena(&mut self) -> *mut Arena {
     #[cfg(feature = "gc_debug")]
     {
-      eprintln!("allocate_new_arena()");
+      debug!(2, "allocate_new_arena()");
       self.dump_memory_variables();
     }
 
@@ -204,10 +208,10 @@ impl NodeAllocator {
   }
 
   /// Allocate a new `DagNode` when the current arena is (almost) full.
-  unsafe fn slow_new_dag_node(&mut self) -> *mut DagNode {
+  unsafe fn slow_new_dag_node(&mut self) -> *mut DagNodeCore {
     #[cfg(feature = "gc_debug")]
     {
-      eprintln!("slow_new_dag_node()");
+      debug!(2, "slow_new_dag_node()");
       self.dump_memory_variables();
     }
 
@@ -346,7 +350,7 @@ impl NodeAllocator {
       //   active_node_count,
       //   ((active_node_count * size_of::<DagNode>()) as f64) / (1024.0 * 1024.0),
       // );
-      println!(
+      info!(1,
         "{:<10} {:<10} {:<10} {:<10} {:<13} {:<10} {:<10} {:<10} {:<10}",
         "Arenas",
         "Nodes",
@@ -358,17 +362,17 @@ impl NodeAllocator {
         "Now",
         "Now (MB)"
       );
-      println!(
+      info!(1,
         "{:<10} {:<10} {:<10.2} {:<10} {:<13.2} {:<10} {:<10.2} {:<10} {:<10.2}",
         self.arena_count,
         node_capacity,
-        ((node_capacity * size_of::<DagNode>()) as f64) / (1024.0 * 1024.0),
+        ((node_capacity * size_of::<DagNodeCore>()) as f64) / (1024.0 * 1024.0),
         old_active_node_count,
-        (((old_active_node_count) * size_of::<DagNode>()) as f64) / (1024.0 * 1024.0),
+        (((old_active_node_count) * size_of::<DagNodeCore>()) as f64) / (1024.0 * 1024.0),
         old_active_node_count - active_node_count,
-        (((old_active_node_count - active_node_count) * size_of::<DagNode>()) as f64) / (1024.0 * 1024.0),
+        (((old_active_node_count - active_node_count) * size_of::<DagNodeCore>()) as f64) / (1024.0 * 1024.0),
         active_node_count,
-        ((active_node_count * size_of::<DagNode>()) as f64) / (1024.0 * 1024.0),
+        ((active_node_count * size_of::<DagNodeCore>()) as f64) / (1024.0 * 1024.0),
       );
     }
 
@@ -389,7 +393,7 @@ impl NodeAllocator {
     let ideal_arena_count = (active_node_count as f64 * slop_factor / (ARENA_SIZE as f64)).ceil() as u32;
 
     #[cfg(feature = "gc_debug")]
-    println!("ideal_arena_count: {}", ideal_arena_count);
+    debug!(2, "ideal_arena_count: {}", ideal_arena_count);
     while self.arena_count < ideal_arena_count {
       self.allocate_new_arena();
     }
@@ -414,7 +418,7 @@ impl NodeAllocator {
 
     #[cfg(feature = "gc_debug")]
     {
-      eprintln!("end of GC");
+      debug!(2, "end of GC");
       self.dump_memory_variables();
     }
   }
@@ -423,7 +427,7 @@ impl NodeAllocator {
   unsafe fn sweep_arenas(&mut self) {
     #[cfg(feature = "gc_debug")]
     {
-      eprintln!("sweep_arenas()");
+      debug!(2, "sweep_arenas()");
       self.dump_memory_variables();
     }
 
@@ -435,7 +439,7 @@ impl NodeAllocator {
     // effectively just initializes `last_active_arena` and `last_active_node`.
     if !self.current_arena_past_active_arena {
       // First tidy arenas from current up to last_active.
-      let mut node_cursor_ptr: *mut DagNode = self.next_node;
+      let mut node_cursor_ptr: *mut DagNodeCore = self.next_node;
       let mut arena_cursor: *mut Arena = self.current_arena;
 
       while arena_cursor != self.last_active_arena {
@@ -504,7 +508,7 @@ impl NodeAllocator {
           match arena == self.current_arena {
 
             true => {
-              ((self.next_node as isize - d as isize) / size_of::<DagNode>() as isize) as usize
+              ((self.next_node as isize - d as isize) / size_of::<DagNodeCore>() as isize) as usize
             },
 
             false => ARENA_SIZE
@@ -513,7 +517,7 @@ impl NodeAllocator {
 
       for node_idx in 0..bound {
         if d.as_ref_unchecked().is_marked() {
-          eprintln!("check_invariant() : MARKED DagNode! arena = {} node = {}", arena_idx, node_idx);
+          debug!(2, "check_invariant() : MARKED DagNode! arena = {} node = {}", arena_idx, node_idx);
         }
         d = d.add(1);
       } // end loop over nodes
@@ -536,7 +540,7 @@ impl NodeAllocator {
 
       for node_idx in 0..ARENA_SIZE {
         if d.as_ref_unchecked().is_marked() {
-          eprintln!("check_arenas() : MARKED DagNode! arena = {} node = {}", arena_idx, node_idx);
+          debug!(2, "check_arenas() : MARKED DagNode! arena = {} node = {}", arena_idx, node_idx);
         }
         d = d.add(1);
       } // end loop over nodes
@@ -569,11 +573,6 @@ impl NodeAllocator {
       "│{:<32} {:>12}│",
       "current_arena_past_active_arena",
       self.current_arena_past_active_arena
-    );
-    eprintln!(
-      "│{:<32} {:>12}│",
-      "need_to_collect_garbage",
-      self.need_to_collect_garbage
     );
     eprintln!(
       "│{:<32} {:>12p}│",

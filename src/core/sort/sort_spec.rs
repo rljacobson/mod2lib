@@ -12,12 +12,7 @@ functors. `SortSpec`s are not named.
 */
 
 use std::fmt::Display;
-use crate::{
-  core::sort::{
-    Sort,
-    SortPtr
-  },
-};
+use crate::core::sort::SortPtr;
 use crate::abstractions::join_string;
 use crate::api::Arity;
 
@@ -47,7 +42,7 @@ impl SortSpec {
         }
       },
 
-      SortSpec::Functor { arg_sorts, ..} => Arity::Value(arg_sorts.len() as i16),
+      SortSpec::Functor { arg_sorts, ..} => Arity::Value(arg_sorts.len() as u16),
 
       SortSpec::Any => Arity::Any,
 

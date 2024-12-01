@@ -26,7 +26,8 @@ use crate::{
   core::{
     allocator::bucket::Bucket,
     Void
-  }
+  },
+  log::{debug, info},
 };
 
 
@@ -116,7 +117,7 @@ impl StorageAllocator {
   unsafe fn slow_allocate_storage(&mut self, bytes_needed: usize) -> *mut u8 {
     #[cfg(feature = "gc_debug")]
     {
-      eprintln!("slow_allocate_storage()");
+      debug!(2, "slow_allocate_storage()");
     }
     // Loop through the bucket list
     let mut prev_bucket: Option<NonNull<Bucket>> = None;
@@ -187,7 +188,7 @@ impl StorageAllocator {
     self.target = max(self.target, TARGET_MULTIPLIER*self.storage_in_use);
 
     if self.show_gc_statistics {
-      println!(
+      info!(1,
         "{:<10} {:<10} {:<10} {:<10} {:<13} {:<10} {:<10} {:<10} {:<10}",
         "Buckets",
         "Bytes",
@@ -199,7 +200,7 @@ impl StorageAllocator {
         "Now",
         "Now (MB)"
       );
-      println!(
+      info!(1,
         "{:<10} {:<10} {:<10.2} {:<10} {:<13.2} {:<10} {:<10.2} {:<10.2}  {:<10.2}",
         self.bucket_count,
         self.total_bytes_allocated,

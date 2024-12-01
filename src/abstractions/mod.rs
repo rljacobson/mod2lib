@@ -32,11 +32,11 @@ encapsulated in the `log` module.
 
 mod nat_set;
 mod rccell;
-mod string_join;
+mod string_util;
 mod heap;
 pub(crate) mod hash;
-pub(crate) mod erased;
-pub(crate) mod graph;
+mod erased;
+mod graph;
 
 use std::collections::HashSet as StdHashSet;
 use std::collections::HashMap as StdHashMap;
@@ -55,6 +55,8 @@ pub use heap::{heap_construct, heap_destroy};
 
 // region Items meant to be used only internally
 
+pub(crate) use graph::Graph;
+
 // A set of (small) natural numbers
 pub(crate) use nat_set::NatSet;
 
@@ -62,7 +64,7 @@ pub(crate) use nat_set::NatSet;
 pub(crate) use rccell::{rc_cell, RcCell, WeakCell};
 
 // Join sequences with a separator
-pub(crate) use string_join::{join_string, join_iter};
+pub(crate) use string_util::{join_string, join_iter, int_to_subscript};
 
 
 /// A `ThingSet` is a hash set of `*const dyn Things`. They are useful if you need to test membership but never need
@@ -71,5 +73,6 @@ pub type Set<T> = StdHashSet<T>; // This replaces Maude's `PointerSet` in most s
 
 pub type HashMap<S, T> = StdHashMap<S, T>;
 
+pub use erased::DynHash;
 
 // endregion

@@ -15,7 +15,7 @@ use std::{
   },
   sync::MutexGuard
 };
-use crate::api::dag_node::DagNode;
+use crate::api::dag_node::{DagNode, DagNodePtr};
 
 static LIST_HEAD: Mutex<AtomicPtr<RootContainer>> = Mutex::new(AtomicPtr::new(std::ptr::null_mut()));
 
@@ -31,40 +31,35 @@ pub fn acquire_root_list() -> MutexGuard<'static, AtomicPtr<RootContainer>> {
 pub struct RootContainer {
   next: Option<NonNull<RootContainer>>,
   prev: Option<NonNull<RootContainer>>,
-  node: Option<NonNull<DagNode>>
+  node: NonNull<dyn DagNode>
 }
 
 unsafe impl Send for RootContainer {}
 
 impl RootContainer {
-  pub fn new(node: *mut DagNode) -> Box<RootContainer> {
+  pub fn new(node: DagNodePtr) -> Box<RootContainer> {
     assert!(!node.is_null());
 
-    let maybe_node: Option<NonNull<DagNode>> = NonNull::new(node);
+    let node: NonNull<dyn DagNode> = NonNull::new(node).unwrap();
     let mut container = Box::new(RootContainer {
       next: None,
       prev: None,
-      node: maybe_node
+      node
     });
-    // We only add the container to the linked list if it holds a node.
-    if !maybe_node.is_none() {
-      container.link();
-    }
+    container.link();
     container
   }
 
   pub fn mark(&mut self) {
     unsafe {
-      if let Some(mut node) = self.node {
-        node.as_mut().mark();
-      }
+      self.node.as_mut().mark();
     }
   }
 
   pub fn link(&mut self){
     let list_head  = acquire_root_list();
     self.prev = None;
-    self.next = unsafe { NonNull::new(*list_head.as_ptr()) };
+    self.next = NonNull::new(list_head.load(Ordering::Relaxed));
 
     if let Some(mut next) = self.next {
       unsafe {
@@ -98,9 +93,7 @@ impl RootContainer {
 
 impl Drop for RootContainer {
   fn drop(&mut self) {
-    if self.node.is_some() {
-      self.unlink();
-    }
+    self.unlink();
   }
 }
 
@@ -113,14 +106,9 @@ pub fn mark_roots() {
              .map(|head| NonNull::new(head as *mut RootContainer).unwrap())
   };
 
-  loop {
-    match root {
-      None => break,
-      Some(mut root_ptr) => {
-        let root_ref = unsafe{ root_ptr.as_mut() };
-        root_ref.mark();
-        root = root_ref.next;
-      }
-    }
+  while let Some(mut root_ptr) = root {
+    let root_ref = unsafe{ root_ptr.as_mut() };
+    root_ref.mark();
+    root = root_ref.next;
   }
 }

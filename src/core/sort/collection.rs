@@ -1,7 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::collections::hash_map::{Entry, Iter};
 use std::iter::Map;
-use std::ops::Index;
 use crate::abstractions::{IString, heap_construct};
 use crate::core::sort::{Sort, SortPtr};
 
