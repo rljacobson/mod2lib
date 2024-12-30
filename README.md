@@ -3,7 +3,7 @@
 The `mod2lib` library builds on lessons learned in writing [`Mod`](https://github.com/rljacobson/Mod) and
 [`mod2`](https://github.com/rljacobson/mod2) to bring advanced pattern matching algorithms to Rust.
 
-It is a work in progress and is not yet functional.
+It is a work in progress and is not yet functional. For a more complete work, check out [Loris](https://github.com/rljacobson/loris).
 
 # Examples
 
