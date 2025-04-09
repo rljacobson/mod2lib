@@ -1,3 +1,5 @@
+‼️***This library has been folded into [`mod2`](https://github.com/rljacobson/mod2) where development is ongoing.***‼️
+
 # `mod2lib`: A pattern matching and term rewriting library
 
 The `mod2lib` library builds on lessons learned in writing [`Mod`](https://github.com/rljacobson/Mod) and
